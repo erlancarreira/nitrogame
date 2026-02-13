@@ -263,7 +263,8 @@ export class NetworkManager {
 
         if (offsets.length > 0) {
             // Median is more robust than mean against outliers (network spikes)
-            const sorted = [...offsets].sort((a, b) => a - b);
+            const filtered = offsets.filter(o => Math.abs(o) < 1000);
+            const sorted = [...filtered].sort((a, b) => a - b);
             const mid = Math.floor(sorted.length / 2);
             this.clockOffset = sorted.length % 2 === 0
                 ? (sorted[mid - 1] + sorted[mid]) / 2

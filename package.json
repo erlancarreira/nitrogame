@@ -45,7 +45,8 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.9",
+    "@gltf-transform/cli": "^4.3.0",
+    "@tailwindcss/postcss": "^4.1.18",
     "@types/howler": "^2.2.12",
     "@types/node": "^22",
     "@types/react": "^19",

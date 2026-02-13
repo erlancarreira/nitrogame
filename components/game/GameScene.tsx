@@ -26,8 +26,10 @@ import { DriftSound } from "./DriftSound";
 import { SpatialEngineSound } from "./SpatialEngineSound";
 import { RedShell } from "./RedShell";
 import type { RacerState } from "@/hooks/use-race-state";
+import { interpolator } from "@/lib/game/interpolator";
+import { NetworkInterpolationLoop } from "./NetworkInterpolationLoop";
 
-type GameSceneProps = {
+export type GameSceneProps = {
   selectedMap: MapConfig;
   players: Player[];
   controls: Controls;
@@ -283,8 +285,14 @@ export const GameScene = React.memo(function GameScene({
   React.useEffect(() => {
     const unsub = networkManager.onMessage((msg) => {
       if (msg.type === "POS" && msg.id !== localPlayerId) {
-        remoteKartDataRef.current[msg.id] = { pos: msg.p, rot: msg.r, speed: msg.s, lapProgress: msg.l, t: msg.t || performance.now() };
-        handlePositionUpdate(msg.id, msg.p, msg.r, msg.s, msg.l || 0);
+        interpolator.addSnapshot(msg.id, {
+          t: msg.t,
+          p: msg.p,
+          r: msg.r,
+          s: msg.s,
+          l: msg.l
+        });
+        return;
       } else if (msg.type === "PLAYER_FINISHED" && msg.id !== localPlayerId) {
         onRemoteFinish?.(msg.id, msg.finishTime);
       }
@@ -470,6 +478,10 @@ export const GameScene = React.memo(function GameScene({
         />
 
         {/* Debug: draw call counter */}
+        <NetworkInterpolationLoop
+          localPlayerId={localPlayerId}
+          handlePositionUpdate={handlePositionUpdate}
+        />
         <DrawCallLogger />
       </Canvas>
     </>

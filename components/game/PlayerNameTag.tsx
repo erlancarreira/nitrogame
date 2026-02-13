@@ -44,6 +44,7 @@ export function PlayerNameTag({
     >
       {/* Background shadow/outline for readability */}
       <Text
+        font="/fonts/Inter.ttf"
         fontSize={FONT_SIZE}
         color="#000000"
         anchorX="center"
@@ -57,6 +58,7 @@ export function PlayerNameTag({
       </Text>
       {/* Foreground colored text */}
       <Text
+        font="/fonts/Inter.ttf"
         fontSize={FONT_SIZE}
         color={color}
         anchorX="center"

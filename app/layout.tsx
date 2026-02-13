@@ -13,6 +13,7 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL!),
   title: 'Turbo Kart Racing',
   description: 'A fun 3D kart racing game built with React Three Fiber',
   applicationName: 'Turbo Kart Racing',
@@ -62,6 +63,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       {/* <body className={`font-sans antialiased`}> */}
+       
       <body className={`${_geist.className} ${_geistMono.className} font-sans antialiased`}>
         {children}
       </body>

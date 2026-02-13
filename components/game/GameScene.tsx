@@ -278,13 +278,21 @@ export const GameScene = React.memo(function GameScene({
     }
     return data;
   }, [localPlayerId, players, selectedMap, startRotation]);
-  const remoteKartDataRef = React.useRef(initialRemoteData);
-  const lastNetworkUpdate = React.useRef(0);
+  const remoteKartDataRef   = React.useRef(initialRemoteData);
+  const lastNetworkUpdate   = React.useRef(0);
+  const lastSnapshotTimeRef = React.useRef<Map<string, number>>(new Map());
 
   // Listen for network updates (POS + ITEM_HIT + PLAYER_FINISHED)
   React.useEffect(() => {
     const unsub = networkManager.onMessage((msg) => {
       if (msg.type === "POS" && msg.id !== localPlayerId) {
+        const last = lastSnapshotTimeRef.current.get(msg.id);
+
+        // ignora pacote atrasado ou duplicado
+        if (last !== undefined && msg.t <= last) return;
+
+        lastSnapshotTimeRef.current.set(msg.id, msg.t);
+
         interpolator.addSnapshot(msg.id, {
           t: msg.t,
           p: msg.p,
@@ -303,8 +311,6 @@ export const GameScene = React.memo(function GameScene({
 
   return (
     <>
-
-
       <Canvas
         dpr={1}
         gl={{

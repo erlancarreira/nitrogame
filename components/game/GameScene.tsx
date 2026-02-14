@@ -358,6 +358,7 @@ export const GameScene = React.memo(function GameScene({
                   onPositionUpdate={handleLocalPositionUpdate}
                   onKartTransformChange={handleKartTransformChange}
                   onEffectsUpdate={handleEffectsUpdateLocal}
+                  isLocalPlayer
                 />
                 <FollowCamera
                   targetRef={playerTransformRef}

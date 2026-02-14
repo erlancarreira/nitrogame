@@ -12,6 +12,14 @@ import {
   FRAME_INTERVAL,
   MAX_PENDING_INPUTS
 } from '@/types/network';
+import {
+  KartPhysicsState,
+  PhysicsInput,
+  createPhysicsState,
+  stateToPlayerState,
+  updateKartPhysics,
+  normalizeInput,
+} from '@/lib/game/kart-physics-core';
 
 /**
  * Hook para gerenciar prediction e reconciliation do kart local.
@@ -19,6 +27,8 @@ import {
  * Inspirado em técnicas de Valorant e Rocket League:
  * - Prediction: Aplica input localmente imediatamente para eliminar delay
  * - Reconciliation: Corrige estado quando recebe snapshot do servidor
+ * 
+ * ATUALIZADO: Agora usa kart-physics-core para física idêntica ao servidor
  * 
  * @param kartId - ID do kart local
  * @param initialPosition - Posição inicial
@@ -33,11 +43,11 @@ export function useNetworkPrediction(
 ) {
   // ============ STATE ============
   
-  // Estado autoritativo do servidor (último snapshot recebido)
-  const serverState = useRef<PlayerState>(createDefaultState(kartId, initialPosition));
+  // Estado de física autoritativo do servidor (último snapshot recebido)
+  const serverState = useRef<KartPhysicsState>(createPhysicsState(initialPosition));
   
-  // Estado renderizado (após prediction/reconciliation)
-  const renderState = useRef<PlayerState>(createDefaultState(kartId, initialPosition));
+  // Estado de física renderizado (após prediction/reconciliation)
+  const renderState = useRef<KartPhysicsState>(createPhysicsState(initialPosition));
   
   // Buffer de inputs pendentes
   const inputBuffer = useRef<InputBuffer>({
@@ -58,42 +68,40 @@ export function useNetworkPrediction(
   // ============ HELPERS ============
   
   /**
-   * Aplica um input ao estado, simulando a física
-   * Esta é uma versão simplificada - você deve adaptar para sua física real
+   * Converte PlayerInput para PhysicsInput
    */
-  const applyInput = useCallback((state: PlayerState, input: PlayerInput): PlayerState => {
-    const newState = { ...state };
-    
-    // Simulação de física simplificada (adicione sua lógica real aqui)
-    const speed = Math.max(0, state.speed + input.throttle * 0.5 - (input.brake ? 0.3 : 0));
-    const turnRate = 0.05 * (speed / 0.5); // Menos virada quando parado
-    
-    // Atualiza rotação
-    newState.rotation += input.steer * turnRate;
-    
-    // Calcula velocidade baseada na direção
-    const vx = Math.sin(newState.rotation) * speed;
-    const vz = Math.cos(newState.rotation) * speed;
-    
-    // Atualiza posição
-    newState.position = [
-      state.position[0] + vx,
-      state.position[1],
-      state.position[2] + vz,
-    ];
-    
-    newState.velocity = [vx, 0, vz];
-    newState.speed = speed;
-    newState.frame = input.frame;
-    
-    return newState;
+  const toPhysicsInput = useCallback((input: PlayerInput): PhysicsInput => {
+    return normalizeInput({
+      throttle: input.throttle,
+      steer: input.steer,
+      brake: input.brake,
+      useItem: input.useItem,
+    });
   }, []);
+  
+  /**
+   * Aplica um input ao estado usando a física compartilhada
+   */
+  const applyInput = useCallback((state: KartPhysicsState, input: PlayerInput): KartPhysicsState => {
+    const physicsInput = toPhysicsInput(input);
+    // Cria uma cópia para não mutar o estado original diretamente
+    const newState: KartPhysicsState = {
+      ...state,
+      position: [...state.position],
+      velocity: [...state.velocity],
+    };
+    return updateKartPhysics(newState, physicsInput, FRAME_INTERVAL / 1000);
+  }, [toPhysicsInput]);
   
   /**
    * Reaplica todos os inputs pendentes após reconciliation
    */
-  const reapplyPendingInputs = useCallback((baseState: PlayerState, lastProcessedFrame: number) => {
-    let state = { ...baseState };
+  const reapplyPendingInputs = useCallback((baseState: KartPhysicsState, lastProcessedFrame: number) => {
+    let state: KartPhysicsState = { 
+      ...baseState,
+      position: [...baseState.position],
+      velocity: [...baseState.velocity],
+    };
     
     // Filtra apenas inputs mais recentes que o último processado
     const inputsToReapply = inputBuffer.current.pending.filter(
@@ -103,7 +111,13 @@ export function useNetworkPrediction(
     // Reaplica cada input na sequência
     for (const pending of inputsToReapply) {
       state = applyInput(state, pending.input);
-      pending.predictedState = state;
+      // Atualiza o estado previsto no pending
+      pending.predictedState = stateToPlayerState(
+        kartId, 
+        state, 
+        pending.input.frame, 
+        Date.now()
+      );
     }
     
     // Atualiza o buffer removendo inputs confirmados
@@ -111,7 +125,7 @@ export function useNetworkPrediction(
     inputBuffer.current.lastConfirmedFrame = lastProcessedFrame;
     
     return state;
-  }, [applyInput]);
+  }, [applyInput, kartId]);
   
   // ============ PUBLIC API ============
   
@@ -127,14 +141,15 @@ export function useNetworkPrediction(
       timestamp: performance.now(),
     };
     
-    // 1. Aplica input localmente (PREDICTION)
+    // 1. Aplica input localmente (PREDICTION) usando física compartilhada
     const predictedState = applyInput(renderState.current, input);
     renderState.current = predictedState;
     
     // 2. Guarda no buffer para reconciliation
+    const playerState = stateToPlayerState(kartId, predictedState, input.frame, Date.now());
     inputBuffer.current.pending.push({
       input,
-      predictedState,
+      predictedState: playerState,
     });
     
     // 3. Limita tamanho do buffer
@@ -152,10 +167,10 @@ export function useNetworkPrediction(
     }
     
     // 5. Notifica mudança de estado
-    onStateChangedRef.current?.(renderState.current);
+    onStateChangedRef.current?.(playerState);
     
-    return renderState.current;
-  }, [roomCode, socket, applyInput]);
+    return playerState;
+  }, [roomCode, socket, applyInput, kartId]);
   
   /**
    * Processa snapshot recebido do servidor (RECONCILIATION)
@@ -167,22 +182,42 @@ export function useNetworkPrediction(
     const myState = snapshot.players[kartId];
     if (!myState) return;
     
+    // Converte PlayerState para KartPhysicsState
+    const serverPhysicsState: KartPhysicsState = {
+      position: [...myState.position],
+      rotation: myState.rotation,
+      speed: myState.speed,
+      velocity: [...myState.velocity],
+      lapProgress: myState.lapProgress,
+      lap: myState.lap,
+      isDrifting: false,
+      driftTime: 0,
+      driftDirection: 0,
+      driftSlideAngle: 0,
+      boostStrength: 1,
+      isInvincible: false,
+      isOilSlipping: false,
+      oilSlipTime: 0,
+      isSpinningOut: false,
+      spinOutTime: 0,
+    };
+    
     // Atualiza estado do servidor
-    serverState.current = myState;
+    serverState.current = serverPhysicsState;
     
     // Se não tem inputs pendentes, apenas sincroniza
     if (inputBuffer.current.pending.length === 0) {
-      renderState.current = myState;
-      onStateChangedRef.current?.(renderState.current);
+      renderState.current = serverPhysicsState;
+      onStateChangedRef.current?.(stateToPlayerState(kartId, renderState.current, snapshot.frame, snapshot.serverTime));
       return;
     }
     
     // Reconciliação: começa do estado do servidor e reaplica inputs pendentes
-    const reconciledState = reapplyPendingInputs(myState, lastProcessedFrame);
+    const reconciledState = reapplyPendingInputs(serverPhysicsState, lastProcessedFrame);
     renderState.current = reconciledState;
     
     // Notifica mudança de estado
-    onStateChangedRef.current?.(renderState.current);
+    onStateChangedRef.current?.(stateToPlayerState(kartId, renderState.current, snapshot.frame, snapshot.serverTime));
   }, [kartId, reapplyPendingInputs]);
   
   /**
@@ -196,6 +231,13 @@ export function useNetworkPrediction(
    * Obtém o estado atual para renderização
    */
   const getRenderState = useCallback((): PlayerState => {
+    return stateToPlayerState(kartId, renderState.current, currentFrame.current, Date.now());
+  }, [kartId]);
+  
+  /**
+   * Obtém o estado de física completo (para uso no KartPro)
+   */
+  const getPhysicsState = useCallback((): KartPhysicsState => {
     return renderState.current;
   }, []);
   
@@ -203,7 +245,7 @@ export function useNetworkPrediction(
    * Reseta o estado (útil para respawn)
    */
   const resetState = useCallback((position?: [number, number, number]) => {
-    const newState = createDefaultState(kartId, position || initialPosition);
+    const newState = createPhysicsState(position || initialPosition);
     serverState.current = newState;
     renderState.current = newState;
     inputBuffer.current = {
@@ -212,7 +254,7 @@ export function useNetworkPrediction(
       lastSentFrame: 0,
     };
     currentFrame.current = 0;
-  }, [kartId, initialPosition]);
+  }, [initialPosition]);
   
   // ============ SOCKET LISTENERS ============
   
@@ -237,6 +279,7 @@ export function useNetworkPrediction(
     processSnapshot,
     onStateChanged,
     getRenderState,
+    getPhysicsState,
     resetState,
     currentFrame,
     pendingInputsCount: () => inputBuffer.current.pending.length,

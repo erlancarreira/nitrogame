@@ -32,12 +32,17 @@ import { networkManager } from '@/lib/game/networking';
  * ATUALIZADO: Agora usa kart-physics-core para física idêntica ao servidor
  * e NetworkManager para comunicação com o servidor (não precisa mais de socket/roomCode)
  * 
+ * IMPORTANTE: Este hook deve ser usado APENAS para o jogador local. Bots e karts remotos
+ * não precisam de prediction/reconciliation pois recebem estado do servidor ou simulam localmente.
+ * 
  * @param kartId - ID do kart local
  * @param initialPosition - Posição inicial
+ * @param isLocalPlayer - Se true, ativa prediction/reconciliation. Se false, retorna estado vazio.
  */
 export function useNetworkPrediction(
   kartId: string,
   initialPosition: [number, number, number],
+  isLocalPlayer: boolean = false,
 ) {
   // ============ STATE ============
   
@@ -129,8 +134,15 @@ export function useNetworkPrediction(
   
   /**
    * Processa um input do jogador (chamado a cada frame)
+   * 
+   * IMPORTANTE: Só funciona se isLocalPlayer for true. Caso contrário, retorna null.
    */
   const processInput = useCallback((inputData: Omit<PlayerInput, 'frame' | 'timestamp'>) => {
+    if (!isLocalPlayer) {
+      // Não é jogador local, não faz prediction
+      return null;
+    }
+    
     currentFrame.current++;
     
     const input: PlayerInput = {
@@ -139,7 +151,7 @@ export function useNetworkPrediction(
       timestamp: performance.now(),
     };
     
-    // 1. Aplica input localmente (PREDICTION) usando física compartilhada
+    // 1. Aplica input localmente (PREDICTION) usando física compartartilhada
     const predictedState = applyInput(renderState.current, input);
     renderState.current = predictedState;
     
@@ -168,7 +180,7 @@ export function useNetworkPrediction(
     onStateChangedRef.current?.(playerState);
     
     return playerState;
-  }, [applyInput, kartId]);
+  }, [isLocalPlayer, applyInput, kartId]);
   
   /**
    * Processa snapshot recebido do servidor (RECONCILIATION)
@@ -177,6 +189,8 @@ export function useNetworkPrediction(
     snapshot: GameSnapshot,
     lastProcessedFrame: number
   ) => {
+    if (!isLocalPlayer) return; // Só reconcilia para jogador local
+    
     const myState = snapshot.players[kartId];
     if (!myState) return;
     
@@ -216,7 +230,7 @@ export function useNetworkPrediction(
     
     // Notifica mudança de estado
     onStateChangedRef.current?.(stateToPlayerState(kartId, renderState.current, snapshot.frame, snapshot.serverTime));
-  }, [kartId, reapplyPendingInputs]);
+  }, [isLocalPlayer, kartId, reapplyPendingInputs]);
   
   /**
    * Define callback para notificação de mudança de estado
@@ -228,21 +242,24 @@ export function useNetworkPrediction(
   /**
    * Obtém o estado atual para renderização
    */
-  const getRenderState = useCallback((): PlayerState => {
+  const getRenderState = useCallback((): PlayerState | null => {
+    if (!isLocalPlayer) return null;
     return stateToPlayerState(kartId, renderState.current, currentFrame.current, Date.now());
-  }, [kartId]);
+  }, [isLocalPlayer, kartId]);
   
   /**
    * Obtém o estado de física completo (para uso no KartPro)
    */
-  const getPhysicsState = useCallback((): KartPhysicsState => {
+  const getPhysicsState = useCallback((): KartPhysicsState | null => {
+    if (!isLocalPlayer) return null;
     return renderState.current;
-  }, []);
+  }, [isLocalPlayer]);
   
   /**
    * Reseta o estado (útil para respawn)
    */
   const resetState = useCallback((position?: [number, number, number]) => {
+    if (!isLocalPlayer) return;
     const newState = createPhysicsState(position || initialPosition);
     serverState.current = newState;
     renderState.current = newState;
@@ -252,18 +269,21 @@ export function useNetworkPrediction(
       lastSentFrame: 0,
     };
     currentFrame.current = 0;
-  }, [initialPosition]);
+  }, [isLocalPlayer, initialPosition]);
   
   // ============ NETWORK LISTENERS ============
   
   useEffect(() => {
+    // Só registra listener se for jogador local
+    if (!isLocalPlayer) return;
+    
     const unsubscribe = networkManager.onMessage((msg) => {
       if (msg.type === "GAME_SNAPSHOT") {
         processSnapshot(msg.snapshot, msg.lastProcessedFrame);
       }
     });
     return unsubscribe;
-  }, [processSnapshot]);
+  }, [isLocalPlayer, processSnapshot]);
   
   // ============ RETURN ============
   
@@ -275,7 +295,7 @@ export function useNetworkPrediction(
     getPhysicsState,
     resetState,
     currentFrame,
-    pendingInputsCount: () => inputBuffer.current.pending.length,
+    pendingInputsCount: () => isLocalPlayer ? inputBuffer.current.pending.length : 0,
   };
 }
 

@@ -1,0 +1,14 @@
+/assets/sounds/sfx/hit.ogg
+/assets/sounds/sfx/item_collect.ogg
+/assets/sounds/sfx/lap_complete.ogg
+/assets/sounds/sfx/race_finish.ogg
+/assets/sounds/sfx/spin_out.ogg
+/assets/sounds/sfx/ui_click.ogg
+/assets/sounds/sfx/ui_hover.ogg
+/assets/sounds/sfx/victory.ogg
+
+/assets/sounds/sfx/banana_hit.ogg
+/assets/sounds/sfx/boost.ogg
+/assets/sounds/sfx/countdown_beep.ogg
+/assets/sounds/sfx/countdown_go.ogg
+/assets/sounds/sfx/drift.ogg

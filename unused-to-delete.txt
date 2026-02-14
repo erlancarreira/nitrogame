@@ -1,0 +1,304 @@
+
+🔴 POSSÍVEIS NÃO USADOS:
+
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\biker characters 3d model.glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Beatall.fbm\387359c5580f06c08c266126b3b46db47e48ba44.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Beatall.fbx
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\docLorean.fbm\387359c5580f06c08c266126b3b46db47e48ba44.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\docLorean.fbx
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Landyroamer.fbm\387359c5580f06c08c266126b3b46db47e48ba44.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Landyroamer.fbx
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Toyoyo Highlight.fbm\387359c5580f06c08c266126b3b46db47e48ba44.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Toyoyo Highlight.fbx
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Tristar Racer.fbm\387359c5580f06c08c266126b3b46db47e48ba44.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup\Tristar Racer.fbx
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup-glb\Toyoyo Highlight.glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\designersoup-glb\Tristar Racer.glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\source\b38770b6f84d47c48e22753644d09784.obj
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\body_msh_albedo.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\body_msh_albedo1.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\body_msh_metallic.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\body_msh_normal.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\body_msh_roughness.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\wheels_msh_albedo.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\wheels_msh_metallic.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\wheels_msh_normal.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go-kart\textures\wheels_msh_roughness.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\kart\go_kart (1).glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\cars\texture-palette.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\source\missiles.blend
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\agm-114hellfire_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\agm-65maverick_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\aim-7msparrow_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\aim-7msparrow_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\ch_hj-10d_d.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\ch_hj-10d_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\ch_pl-11_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\ch_pl-11_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\ch_tianyan-90_d.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\ch_tianyan-90_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\hellfire_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\internal_ground_ao_texture.jpeg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\kab-500l_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\kab-500l_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\t_aa-10archer_d.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\t_aim-9sidewinder_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\t_as-14kedge_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\t_jdam_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\t_jdam_red_d.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\us_paveway_ii_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\us_paveway_ii_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\vympel_r-27_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\vympel_r-27_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\vympel_r-77_d_dds.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\items\missile-bomb-collection-fighter-jets-free\textures\vympel_r-77_n.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\green-valley\track_boost_pad.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\green-valley\track_straight_double_lane.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\green-valley\track_straight_one_lane_2.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\green-valley\track_turn_90deg.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\source\MIKS Karting 2022 All-in-one.fbx
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\AimolMotoroils.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\AIMOLp2.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\asphalt-texture_(10)2White.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\asphalt-texture_(10)3.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\atomic_prewp2.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\auto-plus (2).png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\BlackPlastic.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\ConcGrey.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\ConcGreyNBlack.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\cx-5-geneva-action-6p2.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\DarkGrey.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\f4e2da32267ab160cf306e901640d9c8.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\FabricPolyethyleneHZ.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\Fine_Asphalt_vlzobiady_2K_AO.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\Fine_Asphalt_vlzobiady_2K_BaseColor.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\Fine_Asphalt_vlzobiady_2K_Normal.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\Fine_Asphalt_vlzobiady_2K_Roughness.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\Fine_Asphalt_vlzobiady_2K_Specular.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\MAZDAkartingACADEMY.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\Miks karting2upp2.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\PAINTbitDarkerGREY.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\PlasticBagPolyethylene.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\RedPlastic.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\Slick.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\SlickRED.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\SuperConc.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew1.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew1RED.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew2.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew2RED.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew3.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew3RED.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew5.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew5RED.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew6.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew6RED.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\TireNew6WHITE.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track\textures\WhitePlastic.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\miks_karting_indoor\miks-karting-2022-indoor-karting-race-track.zip
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\source\Primo21.fbx
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Ab1545-_1_.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Ab4854t.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Ab9782t.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\asphalt-texture__10_2White.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\blue.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Bricks_Beige.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\BRICKS_lightgrey.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Bricks_Orange.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\CeramicTiles_RedNBlack.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\checkered_flag.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\ConcGrey.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\cone.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\cone_black.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\DarkGrey.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\decal.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Dy4tyGfXQAAbLR6-e1549736511389.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\E9pfVBgXoAI6meO.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\f4e2da32267ab160cf306e901640d9c8.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\flag.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Green_exhausted.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\internal_ground_ao_texture.jpeg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\karting.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\kartprolandrace.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\marble_tiles_seamless_texture_2683.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\marshall_O.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Metal_Red.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\occ30_gokart.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Planks_352.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\plaster_seamless_texture_4313.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Primo Logo whiteback.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Primo podium lite.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Primo podium.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\profiled sheet light gray + blue.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\profiled sheet light gray.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\red.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\RedPlasticBetter.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Road_Asphalt_rh0ribp0_2K_AO.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Road_Asphalt_rh0ribp0_2K_BaseColor.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Road_Asphalt_rh0ribp0_2K_Normal.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\roller-shutter-vector-1501148.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\rubber_seamless_texture_4748.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\signs.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\skidsnew_(1).png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\Sportivnyy-karting.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\SuperConc.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\TireNew1BLACK.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\TireNew1BLUE_NRM.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\TireNew1BLUE_OCC.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\TireNew1BLUE_SPEC.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\tony-kart-european-champs-6-1200x600.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\tyres.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\yellow.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\fbx\textures\YellowPlastic.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\glb\1\primo_karting__karting_race_track.glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\glb\2\primo_karting__karting_race_track (1).glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\license.txt
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\scene.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\scene.gltf
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\03_-_Default_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\03_-_Default_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_baseColor.jpeg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_metallicRoughness.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_metallicRoughness.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_normal.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_normal.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_pained_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\asphalt_pained_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner10_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner10_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner1_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner1_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Banner2_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Banner2_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Banner3_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Banner3_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner4_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner4_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner5_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner5_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner6_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner6_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner7_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner7_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner8_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner8_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner9_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\banner9_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\blue_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\brick2_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\brick2_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\brick3_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\brick3_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\brick_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\brick_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\car_door_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\car_door_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\checkered_flag_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\checkered_flag_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\concrete_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\concrete_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Cone_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Cone_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\curtains_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\curtains_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\dark_shit_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\flag_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\flag_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\floor_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\floor_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\jocker_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\jocker_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\marshall_o_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\marshall_o_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\marshall_o_metallicRoughness.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\marshall_o_metallicRoughness.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Plastic_green_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Plastic_red_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Plastic_red_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\plastic_white_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\plastic_white_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Plastic_yellow_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Plastic_yellow_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\profile_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\profile_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\p_logo_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\p_logo_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\red_flag_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\red_shit_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\red_shit_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\roof2_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\roof2_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\roof_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\roof_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\RubberBlack_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\RubberBlack_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Signs_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\Signs_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\some_shit_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\some_shit_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\some_shit_too_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\some_shit_too_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_metallicRoughness.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_metallicRoughness.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_new_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_new_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_normal.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_normal.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_specularf0.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\tyres_specularf0.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\wall1_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\wall1_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\wall_sponsors2_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\wall_sponsors2_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\wall_sponsors_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\wall_sponsors_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\gltf\textures\yellow_flag_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\Primo Karting - Karting Race Track\udz\Primo_Karting__Karting_Race_Track.usdz
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\tracker-models\low-road-2.zip
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\tracker-models\low_road_-_2.glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\tracker-models\Low_road_-_2.usdz
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kart-map\tracker-models\low_road_-_2.zip
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\Bush_1_A_Color1.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\Bush_2_A_Color1.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\forest_texture.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\forest_texture.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\Rock_1_A_Color1.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\Rock_2_A_Color1.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\Tree_1_A_Color1.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\Tree_1_B_Color1.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\kaykit\forest\Tree_2_A_Color1.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\menu-bg.jpg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Maria\fbx\mario-kart-tour-baby-mario-koala-for-mobile.zip
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Maria\glb\mario_kart_tour_-_baby_mario_koala_for_mobile.zip
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Maria\gltf\mario_kart_tour_-_baby_mario_koala_for_mobile (1).zip
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Maria\udz\Mario_Kart_Tour_-_Baby_Mario_Koala_for_mobile.usdz
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\fbx\source\Mobile - Mario Kart Tour - Mario.zip
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\fbx\textures\T_Mario_Body_Alb.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\fbx\textures\T_Mario_Body_Nrm.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\fbx\textures\T_Mario_Eye_Alb.0.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\fbx\textures\T_Mario_Eye_Nrm.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\glb\mario_kart_tour_-_mario.glb
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\gltf\license.txt
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\gltf\scene.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\gltf\scene.gltf
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\gltf\textures\M_Mario_Body_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\gltf\textures\M_Mario_Body_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\gltf\textures\M_Mario_Eye_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\gltf\textures\M_Mario_Eye_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\usdz\license.txt
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\usdz\scene.bin
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\usdz\scene.gltf
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\usdz\textures\M_Mario_Body_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\usdz\textures\M_Mario_Body_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\usdz\textures\M_Mario_Eye_baseColor.png
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\person\Mario\usdz\textures\M_Mario_Eye_baseColor.webp
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\sounds\freesound_community-audi-v8-acceleration-sound-6067.mp3
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\sounds\sfx\Go-Kart-Sound-Effects-2_Engine-revving.ogg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\sounds\sfx\Go-Kart-Sound-Effects-3_Engine-revving.ogg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\sounds\sfx\Go-Kart-Sound-Effects-Download-SFX-Library-Soundsnap.ogg
+C:\YMONETIZE\Labs\mario-kart\mario-kart-clone\public\assets\sounds\sfx\Go-Kart-Sound-Effects-Download-SFX-Library-Soundsnap_4.ogg
+
+Total candidatos a remoção: 299

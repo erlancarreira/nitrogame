@@ -1,6 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import { Player } from "./types";
-import type { GameSnapshot } from "../../types/network";
+import type { GameSnapshot, PlayerInput } from "../../types/network";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 function devLog(...args: unknown[]) { if (IS_DEV) console.log(...args); }
@@ -393,6 +393,11 @@ export class NetworkManager {
     // Start game (host only)
     emitStartGame(data: { mapId: string; laps: number; players: Player[] }): void {
         this.socket?.emit("start-game", { code: this.roomCode, ...data });
+    }
+
+    // Envia input de jogador (para prediction/reconciliation do servidor)
+    emitPlayerInput(input: PlayerInput): void {
+        this.socket?.volatile.emit("player-input", { code: this.roomCode, input });
     }
 
     // Send message — POS goes via WebRTC (fallback Socket.IO), rest via Socket.IO

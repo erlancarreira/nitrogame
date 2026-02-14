@@ -450,7 +450,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         if (isLocalPlayer) {
             const phys = network.getPhysicsState();
             if (phys) {
-                const blend = 0.3; // 0 = ignora prediction, 1 = segue 100%
+                const blend = 0.10; // 0 = ignora prediction, 1 = segue 100%
 
                 tx = THREE.MathUtils.lerp(tx, phys.position[0], blend);
                 tz = THREE.MathUtils.lerp(tz, phys.position[2], blend);

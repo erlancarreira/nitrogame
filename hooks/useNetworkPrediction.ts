@@ -20,6 +20,7 @@ import {
   updateKartPhysics,
   normalizeInput,
 } from '@/lib/game/kart-physics-core';
+import { networkManager } from '@/lib/game/networking';
 
 /**
  * Hook para gerenciar prediction e reconciliation do kart local.
@@ -29,17 +30,14 @@ import {
  * - Reconciliation: Corrige estado quando recebe snapshot do servidor
  * 
  * ATUALIZADO: Agora usa kart-physics-core para física idêntica ao servidor
+ * e NetworkManager para comunicação com o servidor (não precisa mais de socket/roomCode)
  * 
  * @param kartId - ID do kart local
  * @param initialPosition - Posição inicial
- * @param socket - Socket.IO socket conectado
- * @param roomCode - Código da sala
  */
 export function useNetworkPrediction(
   kartId: string,
   initialPosition: [number, number, number],
-  socket: any, // Socket.IO socket
-  roomCode: string
 ) {
   // ============ STATE ============
   
@@ -157,11 +155,11 @@ export function useNetworkPrediction(
       inputBuffer.current.pending.shift();
     }
     
-    // 4. Envia para servidor (throttled)
+    // 4. Envia para servidor via NetworkManager (throttled)
     const now = performance.now();
     if (now - lastInputSendTime.current >= 1000 / INPUT_SEND_RATE) {
-      if (socket?.connected) {
-        socket.emit('player-input', { roomCode, input }, { volatile: true });
+      if (networkManager.roomCode) {
+        networkManager.emitPlayerInput(input);
         lastInputSendTime.current = now;
       }
     }
@@ -170,7 +168,7 @@ export function useNetworkPrediction(
     onStateChangedRef.current?.(playerState);
     
     return playerState;
-  }, [roomCode, socket, applyInput, kartId]);
+  }, [applyInput, kartId]);
   
   /**
    * Processa snapshot recebido do servidor (RECONCILIATION)
@@ -256,21 +254,16 @@ export function useNetworkPrediction(
     currentFrame.current = 0;
   }, [initialPosition]);
   
-  // ============ SOCKET LISTENERS ============
+  // ============ NETWORK LISTENERS ============
   
   useEffect(() => {
-    if (!socket) return;
-    
-    const handleSnapshot = (data: { snapshot: GameSnapshot; lastProcessedFrame: number }) => {
-      processSnapshot(data.snapshot, data.lastProcessedFrame);
-    };
-    
-    socket.on('game-snapshot', handleSnapshot);
-    
-    return () => {
-      socket.off('game-snapshot', handleSnapshot);
-    };
-  }, [socket, processSnapshot]);
+    const unsubscribe = networkManager.onMessage((msg) => {
+      if (msg.type === "GAME_SNAPSHOT") {
+        processSnapshot(msg.snapshot, msg.lastProcessedFrame);
+      }
+    });
+    return unsubscribe;
+  }, [processSnapshot]);
   
   // ============ RETURN ============
   

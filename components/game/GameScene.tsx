@@ -177,30 +177,16 @@ export const GameScene = React.memo(function GameScene({
 
   const handleLocalPositionUpdate = useCallback(
     (id: string, pos: [number, number, number], rot: number, speed: number, progress: number) => {
+      // Atualiza HUD/minimapa/localmente, mas não envia mais POS via WebRTC.
       handlePositionUpdate(id, pos, rot, speed, progress);
-      const now = performance.now();
-      if (now - lastNetworkUpdate.current > 33) {
-        lastNetworkUpdate.current = now;
-        networkManager.broadcast({
-          type: "POS", id, p: pos, r: rot, s: speed, l: progress, t: performance.now(),
-        });
-      }
     },
     [handlePositionUpdate]
   );
 
-  // Host-only: broadcast bot positions to remote players
+  // Host-only: broadcast bot positions to remote players (agora só para HUD, sem POS)
   const handleBotPositionUpdate = useCallback(
     (id: string, pos: [number, number, number], rot: number, speed: number, progress: number) => {
       handlePositionUpdate(id, pos, rot, speed, progress);
-      if (!networkManager.isHost) return;
-      const now = performance.now();
-      if (now - lastNetworkUpdate.current > 33) {
-        lastNetworkUpdate.current = now;
-        networkManager.broadcast({
-          type: "POS", id, p: pos, r: rot, s: speed, l: progress, t: performance.now(),
-        });
-      }
     },
     [handlePositionUpdate]
   );
@@ -282,10 +268,32 @@ export const GameScene = React.memo(function GameScene({
   const lastNetworkUpdate   = React.useRef(0);
   const lastSnapshotTimeRef = React.useRef<Map<string, number>>(new Map());
 
-  // Listen for network updates (POS + ITEM_HIT + PLAYER_FINISHED)
+  // Listen for network updates (GAME_SNAPSHOT + fallback POS + ITEM_HIT + PLAYER_FINISHED)
   React.useEffect(() => {
     const unsub = networkManager.onMessage((msg) => {
+      if (msg.type === "GAME_SNAPSHOT") {
+        const snapshot = msg.snapshot;
+        Object.entries(snapshot.players).forEach(([id, state]) => {
+          if (id === localPlayerId) return;
+
+          const last = lastSnapshotTimeRef.current.get(id);
+          if (last !== undefined && snapshot.serverTime <= last) return;
+
+          lastSnapshotTimeRef.current.set(id, snapshot.serverTime);
+
+          interpolator.addSnapshot(id, {
+            t: snapshot.serverTime,
+            p: state.position as [number, number, number],
+            r: state.rotation,
+            s: state.speed,
+            l: state.lapProgress,
+          });
+        });
+        return;
+      }
+
       if (msg.type === "POS" && msg.id !== localPlayerId) {
+        // Fallback para caminhos antigos, se ainda houver POS via WebRTC
         const last = lastSnapshotTimeRef.current.get(msg.id);
 
         // ignora pacote atrasado ou duplicado

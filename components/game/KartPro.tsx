@@ -154,7 +154,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const BODY_MASS = preset.mass;
 
     // Network prediction hook (usado apenas para o jogador local)
-    const network = useNetworkPrediction(id, position);
+    const network = useNetworkPrediction(id, position, !!isLocalPlayer);
 
     useEffect(() => {
         controlsRef.current = { ...controlsProp };
@@ -449,17 +449,19 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         // Integra prediction/reconciliation do hook no jogador local
         if (isLocalPlayer) {
             const phys = network.getPhysicsState();
-            const blend = 0.3; // 0 = ignora prediction, 1 = segue 100%
+            if (phys) {
+                const blend = 0.3; // 0 = ignora prediction, 1 = segue 100%
 
-            tx = THREE.MathUtils.lerp(tx, phys.position[0], blend);
-            tz = THREE.MathUtils.lerp(tz, phys.position[2], blend);
-            rot = THREE.MathUtils.lerp(rot, phys.rotation, blend);
+                tx = THREE.MathUtils.lerp(tx, phys.position[0], blend);
+                tz = THREE.MathUtils.lerp(tz, phys.position[2], blend);
+                rot = THREE.MathUtils.lerp(rot, phys.rotation, blend);
 
-            // Empurra o corpo de física para perto do estado previsto
-            body.setTranslation({ x: tx, y: ty, z: tz }, true);
-            _quat.current.setFromAxisAngle(_axis.current, rot);
-            body.setRotation(_quat.current, true);
-            currentRotation.current = rot;
+                // Empurra o corpo de física para perto do estado previsto
+                body.setTranslation({ x: tx, y: ty, z: tz }, true);
+                _quat.current.setFromAxisAngle(_axis.current, rot);
+                body.setRotation(_quat.current, true);
+                currentRotation.current = rot;
+            }
         }
 
         onKartTransformChange?.([tx, ty, tz], rot);

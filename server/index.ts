@@ -1,5 +1,13 @@
 import { createServer } from "http";
 import { Server, Socket } from "socket.io";
+import type { PlayerInput, GameSnapshot, PlayerState } from "../types/network";
+import {
+  KartPhysicsState,
+  createPhysicsState,
+  updateKartPhysics,
+  stateToPlayerState,
+  normalizeInput,
+} from "../lib/game/kart-physics-core";
 
 const PORT = Number(process.env.PORT) || 3001;
 const httpServer = createServer();
@@ -31,7 +39,22 @@ interface Room {
   gameStarted: boolean;
 }
 
+// Simulation types for authoritative server
+interface SimPlayer {
+  physics: KartPhysicsState;
+  inputs: PlayerInput[];
+  lastProcessedFrame: number;
+}
+
+interface RoomSimulation {
+  roomCode: string;
+  frame: number;
+  lastSnapshotAt: number;
+  players: Map<string, SimPlayer>; // key = socketId
+}
+
 const rooms = new Map<string, Room>();
+const roomSims = new Map<string, RoomSimulation>();
 
 // ---- Rate Limiting (per-socket) ----
 
@@ -43,6 +66,7 @@ const RATE = {
   signaling: { limit: 300, intervalMs: 10_000 },   // WebRTC offer/answer/ICE, reliable msgs
   posRelay: { limit: 600, intervalMs: 10_000 },    // Fallback POS relay (≈60/s)
   clock: { limit: 120, intervalMs: 10_000 },       // clock-sync pings
+  input: { limit: 1200, intervalMs: 10_000 },      // player-input events (≈120/s)
 };
 
 function allowRate(socket: Socket, key: string, limit: number, intervalMs: number): boolean {
@@ -120,6 +144,16 @@ function getRoomBySocket(socketId: string): Room | undefined {
 function removePlayerFromRoom(room: Room, socketId: string): void {
   room.players = room.players.filter(p => p.socketId !== socketId);
 
+  // Remove from simulation state as well
+  const sim = roomSims.get(room.code);
+  if (sim) {
+    sim.players.delete(socketId);
+    if (sim.players.size === 0) {
+      roomSims.delete(room.code);
+      console.log(`[sim] RoomSim ${room.code} deleted (no players)`);
+    }
+  }
+
   if (room.players.length === 0) {
     rooms.delete(room.code);
     console.log(`[room] Room ${room.code} deleted (empty)`);
@@ -141,6 +175,45 @@ function removePlayerFromRoom(room: Room, socketId: string): void {
     settings: room.settings,
   });
   io.to(room.code).emit("player-disconnected", { playerId: socketId });
+}
+
+// ---- Simulation helpers ----
+
+const SIM_RATE = 60; // Hz
+const SIM_DT_MS = 1000 / SIM_RATE;
+const SNAPSHOT_RATE = 20; // Hz
+const SNAPSHOT_INTERVAL_MS = 1000 / SNAPSHOT_RATE;
+
+function ensureRoomSimulation(room: Room): RoomSimulation {
+  let sim = roomSims.get(room.code);
+  if (!sim) {
+    sim = {
+      roomCode: room.code,
+      frame: 0,
+      lastSnapshotAt: Date.now(),
+      players: new Map<string, SimPlayer>(),
+    };
+    roomSims.set(room.code, sim);
+  } else {
+    // Reset for new race
+    sim.frame = 0;
+    sim.lastSnapshotAt = Date.now();
+    sim.players.clear();
+  }
+
+  // Initialize players physics state
+  for (const player of room.players) {
+    // TODO: Use actual spawn positions from track config.
+    const physics = createPhysicsState([0, 0, 0]);
+    sim.players.set(player.socketId, {
+      physics,
+      inputs: [],
+      lastProcessedFrame: 0,
+    });
+  }
+
+  console.log(`[sim] Initialized simulation for room ${room.code} with ${room.players.length} players`);
+  return sim;
 }
 
 // ---- Socket.IO Handlers ----
@@ -309,6 +382,9 @@ io.on("connection", (socket: Socket) => {
     room.gameStarted = true;
     room.players = data.players;
 
+    // Initialize authoritative simulation for this room
+    ensureRoomSimulation(room);
+
     // Race starts 4 seconds from now: 3s countdown + 0.5s "GO!" display + 0.5s buffer
     const raceStartTime = Date.now() + 4000;
 
@@ -319,6 +395,17 @@ io.on("connection", (socket: Socket) => {
       players: data.players,
       raceStartTime,
     });
+  });
+
+  // --- PLAYER INPUT (authoritative sim) ---
+  socket.on("player-input", (data: { roomCode: string; input: PlayerInput }) => {
+    if (!guard(socket, "player-input", RATE.input)) return;
+    const { roomCode, input } = data;
+    const sim = roomSims.get(roomCode);
+    if (!sim) return;
+    const simPlayer = sim.players.get(socket.id);
+    if (!simPlayer) return;
+    simPlayer.inputs.push(input);
   });
 
   // --- WebRTC Signaling ---
@@ -377,6 +464,78 @@ io.on("connection", (socket: Socket) => {
     removePlayerFromRoom(room, disconnectedId);
   });
 });
+
+// ---- Authoritative Simulation Loop ----
+
+setInterval(() => {
+  const now = Date.now();
+
+  for (const sim of roomSims.values()) {
+    sim.frame += 1;
+
+    // Update each player's physics based on queued inputs
+    for (const [socketId, simPlayer] of sim.players) {
+      const { physics } = simPlayer;
+      const inputs = simPlayer.inputs;
+
+      // Process queued inputs in frame order
+      if (inputs.length > 0) {
+        inputs.sort((a, b) => a.frame - b.frame);
+        for (const input of inputs) {
+          if (input.frame <= simPlayer.lastProcessedFrame) continue;
+          const physInput = normalizeInput({
+            throttle: input.throttle,
+            steer: input.steer,
+            brake: input.brake,
+            useItem: input.useItem,
+          });
+          updateKartPhysics(physics, physInput, SIM_DT_MS / 1000);
+          simPlayer.lastProcessedFrame = input.frame;
+        }
+        // Clear processed inputs
+        simPlayer.inputs = [];
+      } else {
+        // No new input — still advance physics with neutral input for drag/decay
+        const neutralInput = normalizeInput({
+          throttle: 0,
+          steer: 0,
+          brake: false,
+          useItem: false,
+        });
+        updateKartPhysics(physics, neutralInput, SIM_DT_MS / 1000);
+      }
+    }
+
+    // Periodically send snapshots to clients
+    if (now - sim.lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) {
+      const playersState: Record<string, PlayerState> = {};
+      for (const [socketId, simPlayer] of sim.players) {
+        playersState[socketId] = stateToPlayerState(
+          socketId,
+          simPlayer.physics,
+          sim.frame,
+          now
+        );
+      }
+
+      const snapshot: GameSnapshot = {
+        frame: sim.frame,
+        serverTime: now,
+        players: playersState,
+      };
+
+      // Send per-player with their own lastProcessedFrame for reconciliation
+      for (const [socketId, simPlayer] of sim.players) {
+        io.to(socketId).emit("game-snapshot", {
+          snapshot,
+          lastProcessedFrame: simPlayer.lastProcessedFrame,
+        });
+      }
+
+      sim.lastSnapshotAt = now;
+    }
+  }
+}, SIM_DT_MS);
 
 // ---- Start Server ----
 

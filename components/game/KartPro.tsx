@@ -44,10 +44,6 @@ interface KartProps {
         driftTier: number;
     }) => void;
     touchControlsRef?: React.RefObject<Controls>;
-    /** Socket.IO client usado para prediction/reconciliation do jogador local */
-    socket?: any;
-    /** Código da sala atual, usado para eventos de network */
-    roomCode?: string;
     /** Se este kart representa o jogador local (aplica prediction) */
     isLocalPlayer?: boolean;
 }
@@ -83,8 +79,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     onKartTransformChange,
     onEffectsUpdate,
     touchControlsRef,
-    socket,
-    roomCode,
     isLocalPlayer,
 }, ref) => {
     const rigidBodyRef = useRef<RapierRigidBody>(null);
@@ -160,7 +154,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const BODY_MASS = preset.mass;
 
     // Network prediction hook (usado apenas para o jogador local)
-    const network = useNetworkPrediction(id, position, socket, roomCode || "");
+    const network = useNetworkPrediction(id, position);
 
     useEffect(() => {
         controlsRef.current = { ...controlsProp };
@@ -446,16 +440,37 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         onSpeedChange?.(Math.abs(currentSpeed.current));
 
         // Camera transform — EVERY frame for smooth following
-        const t = body.translation();
-        onKartTransformChange?.([t.x, t.y, t.z], currentRotation.current);
+        let t = body.translation();
+        let tx = t.x;
+        let ty = t.y;
+        let tz = t.z;
+        let rot = currentRotation.current;
+
+        // Integra prediction/reconciliation do hook no jogador local
+        if (isLocalPlayer) {
+            const phys = network.getPhysicsState();
+            const blend = 0.3; // 0 = ignora prediction, 1 = segue 100%
+
+            tx = THREE.MathUtils.lerp(tx, phys.position[0], blend);
+            tz = THREE.MathUtils.lerp(tz, phys.position[2], blend);
+            rot = THREE.MathUtils.lerp(rot, phys.rotation, blend);
+
+            // Empurra o corpo de física para perto do estado previsto
+            body.setTranslation({ x: tx, y: ty, z: tz }, true);
+            _quat.current.setFromAxisAngle(_axis.current, rot);
+            body.setRotation(_quat.current, true);
+            currentRotation.current = rot;
+        }
+
+        onKartTransformChange?.([tx, ty, tz], rot);
 
         // Throttled position update for network/minimap
         if (state.clock.getElapsedTime() % POSITION_UPDATE_INTERVAL < dt) {
             if (trackSplineRef.current) {
-                progressRef.current = trackSplineRef.current.project(t.x, t.z, progressRef.current);
+                progressRef.current = trackSplineRef.current.project(tx, tz, progressRef.current);
             }
 
-            onPositionUpdate?.(id, [t.x, t.y, t.z], currentRotation.current, Math.abs(currentSpeed.current), progressRef.current);
+            onPositionUpdate?.(id, [tx, ty, tz], rot, Math.abs(currentSpeed.current), progressRef.current);
         }
 
         // Slip ratio for smoke — fade out gradually when drift ends

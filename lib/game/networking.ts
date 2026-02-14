@@ -1,5 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import { Player } from "./types";
+import type { GameSnapshot } from "../../types/network";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 function devLog(...args: unknown[]) { if (IS_DEV) console.log(...args); }
@@ -16,7 +17,8 @@ export type NetworkMessage =
     | { type: "ITEM_HIT"; targetId: string; effect: "spinOut" | "oilSlip" | "boost" }
     | { type: "PLAYER_FINISHED"; id: string; finishTime: number; lap: number }
     | { type: "SHELL_SPAWN"; shell: { id: string; ownerId: string; targetId: string | null; startPosition: [number, number, number]; startRotation: number } }
-    | { type: "SHELL_DESPAWN"; shellId: string };
+    | { type: "SHELL_DESPAWN"; shellId: string }
+    | { type: "GAME_SNAPSHOT"; snapshot: GameSnapshot; lastProcessedFrame: number };
 
 export interface LobbySettings {
     mapId: string;
@@ -158,7 +160,7 @@ export class NetworkManager {
         return () => { this._reconnectedListeners = this._reconnectedListeners.filter(l => l !== listener); };
     }
 
-    // ── Emit helpers (private) ──
+    // ── Emit helpers (private) ─
     private emit(event: "message", msg: NetworkMessage): void;
     private emit(event: "playerDisconnected", playerId: string): void;
     private emit(event: "close" | "tempDisconnect" | "reconnected"): void;
@@ -481,6 +483,15 @@ export class NetworkManager {
             // Initiate WebRTC mesh with all human players after game starts
             const humanRemotes = players.filter((p) => !p.isBot && p.id !== this.myId);
             this.initiateWebRTCMesh(humanRemotes);
+        });
+
+        // Authoritative game snapshots from server
+        this.socket.on("game-snapshot", (data: { snapshot: GameSnapshot; lastProcessedFrame: number }) => {
+            this.emit("message", {
+                type: "GAME_SNAPSHOT",
+                snapshot: data.snapshot,
+                lastProcessedFrame: data.lastProcessedFrame,
+            });
         });
 
         // Reliable message relay

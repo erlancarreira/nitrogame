@@ -12,6 +12,7 @@ import { PRESET_STANDARD, type KartPhysicsConfig, type KartPresetId, KART_PRESET
 import { KartDriftSmoke, getRearWheelPositions } from "./KartEffects";
 import { PlayerNameTag } from "./PlayerNameTag";
 import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, MAX_DELTA, POSITION_UPDATE_INTERVAL, SPAWN_Y_OFFSET } from "@/lib/game/engine-constants";
+import { useNetworkPrediction } from "@/hooks/useNetworkPrediction";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -43,6 +44,12 @@ interface KartProps {
         driftTier: number;
     }) => void;
     touchControlsRef?: React.RefObject<Controls>;
+    /** Socket.IO client usado para prediction/reconciliation do jogador local */
+    socket?: any;
+    /** Código da sala atual, usado para eventos de network */
+    roomCode?: string;
+    /** Se este kart representa o jogador local (aplica prediction) */
+    isLocalPlayer?: boolean;
 }
 
 export interface KartRef {
@@ -59,7 +66,7 @@ export interface KartRef {
 
 // ── Component ───────────────────────────────────────────────────────
 
-export const KartPro = forwardRef<KartRef, KartProps>(({
+export const KartPro = forwardRef<KartRef, KartProps>(({ 
     id,
     playerName,
     playerColor,
@@ -76,6 +83,9 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     onKartTransformChange,
     onEffectsUpdate,
     touchControlsRef,
+    socket,
+    roomCode,
+    isLocalPlayer,
 }, ref) => {
     const rigidBodyRef = useRef<RapierRigidBody>(null);
     const groupRef = useRef<THREE.Group>(null);
@@ -148,6 +158,9 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const SPEED_FACTOR_DIVISOR = preset.speedFactorDivisor;
     const MIN_TURN_SPEED = preset.minTurnSpeed;
     const BODY_MASS = preset.mass;
+
+    // Network prediction hook (usado apenas para o jogador local)
+    const network = useNetworkPrediction(id, position, socket, roomCode || "");
 
     useEffect(() => {
         controlsRef.current = { ...controlsProp };
@@ -312,6 +325,16 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             }
 
             wasDrifting.current = isDrifting.current;
+        }
+
+        // Envia input normalizado para o sistema de prediction (apenas jogador local)
+        if (isLocalPlayer) {
+            network.processInput({
+                throttle,
+                steer: turn,
+                brake: throttle < 0,
+                useItem: false,
+            });
         }
 
         // Block input during spin out — player is stunned

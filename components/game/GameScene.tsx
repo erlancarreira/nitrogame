@@ -313,7 +313,7 @@ export const GameScene = React.memo(function GameScene({
           rot: startRotation,
           speed: 0,
           lapProgress: 0,
-          t: performance.now(),
+          t: netClock.now,
         };
       }
     }

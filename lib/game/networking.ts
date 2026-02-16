@@ -264,8 +264,8 @@ export class NetworkManager {
 
         for (let i = 0; i < samples; i++) {
             try {
-                const offset = await this.pingServer();
-                netClock.addSample(offset);
+                const { serverTime, clientTime } = await this.pingServer();
+                netClock.addSample(serverTime, clientTime);
                 // Small delay between pings to avoid burst
                 if (i < samples - 1) {
                     await new Promise(r => setTimeout(r, 150));
@@ -279,7 +279,7 @@ export class NetworkManager {
         return this.getClockOffset();
     }
 
-    private pingServer(): Promise<number> {
+    private pingServer(): Promise<{ serverTime: number; clientTime: number }> {
         return new Promise((resolve, reject) => {
             if (!this.socket) return reject("no socket");
 
@@ -293,18 +293,13 @@ export class NetworkManager {
                 const clientRecvTime = performance.now();
                 const rtt = clientRecvTime - clientSendTime;
 
-                // offset = serverTime - (clientSendTime + rtt/2)
-                // clientSendTime is NOW performance.now() based on when we sent it
-                // BUT server expects us to send a number it echoes back.
+                // Momento médio da viagem no clock local
+                const clientMid = clientSendTime + rtt / 2;
 
-                // IMPORTANT: The server likely echoes back what we sent. 
-                // We must calculate offset relative to performance.now().
-
-                // If serverTime is Wall Clock (e.g. 1739...), then
-                // offset = 1739... - (p.now() + rtt/2)
-
-                const offset = res.serverTime - (clientSendTime + rtt / 2);
-                resolve(offset);
+                resolve({
+                    serverTime: res.serverTime,
+                    clientTime: clientMid,
+                });
             });
         });
     }

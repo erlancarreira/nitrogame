@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, forwardRef, useImperativeHandle, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
-import { RigidBody, CuboidCollider, RapierRigidBody, useRapier } from "@react-three/rapier";
+import { RigidBody, CuboidCollider, RapierRigidBody } from "@react-three/rapier";
 import * as THREE from "three";
 import type { Controls } from "@/lib/game/types";
 import { CarModel } from "./CarModel";
@@ -11,7 +11,7 @@ import { TrackSpline } from "@/lib/game/track-path";
 import { PRESET_STANDARD, type KartPhysicsConfig, type KartPresetId, KART_PRESETS } from "@/lib/game/physics-presets";
 import { KartDriftSmoke, getRearWheelPositions } from "./KartEffects";
 import { PlayerNameTag } from "./PlayerNameTag";
-import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, MAX_DELTA, POSITION_UPDATE_INTERVAL, SPAWN_Y_OFFSET, KART_MODEL_OFFSET, PHYSICS_TIMESTEP } from '@/lib/game/engine-constants';
+import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, POSITION_UPDATE_INTERVAL, KART_MODEL_OFFSET } from '@/lib/game/engine-constants';
 import { useNetworkPrediction } from "@/hooks/useNetworkPrediction";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -97,7 +97,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const driftTime = useRef(0);          // tempo acumulado em drift
     const driftDirection = useRef(0);     // -1=esquerda, +1=direita, 0=sem drift
     const driftSlideAngle = useRef(0);    // ângulo lateral acumulado do slide
-    const wasDrifting = useRef(false);     // para detectar soltar drift
 
     // Item Effects
     const isInvincible = useRef(false);
@@ -155,20 +154,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
 
     // Network prediction hook (usado apenas para o jogador local)
     const network = useNetworkPrediction(id, position, initialRotation, !!isLocalPlayer);
-
-    // Raycast Suspension Constants
-    const GROUND_RAY_OFFSET = 1.0;
-    const GROUND_RAY_RANGE = 3.0;
-    const HOVER_HEIGHT = 0.35; // Target height above ground (Collider center is at 0.3)
-    const SPRING_STIFFNESS = 20.0;
-
-    // Rapier World for Raycasting
-    const { world, rapier } = useRapier();
-    const rayRef = useRef<InstanceType<typeof rapier.Ray> | null>(null);
-    const getRay = () => {
-        if (!rayRef.current) rayRef.current = new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
-        return rayRef.current;
-    };
 
     useEffect(() => {
         controlsRef.current = { ...controlsProp };
@@ -231,7 +216,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         },
     }));
 
-    const accumulator = useRef(0);
     const lastUpdateTime = useRef(0);
 
     useFrame((state, delta) => {
@@ -279,13 +263,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         }
 
         const input = controlsRef.current;
-        if (touchControlsRef?.current) {
-            input.steerX = touchControlsRef.current.steerX;
-            input.throttleY = touchControlsRef.current.throttleY;
-        }
-
-        // 1. Accumulate Time
-        accumulator.current += Math.min(delta, 0.1); // Clamp to 100ms
 
         // --- INPUT LOGIC (Read once per frame) ---
         let throttle = 0;
@@ -366,16 +343,19 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
 
                 // 1. Calculate target velocity vector from Core state
                 // state.speed is the magnitude; state.rotation is the direction
+                // CLAMP SPEED: Prevent physics explosions if core goes wild
+                const clampedSpeed = THREE.MathUtils.clamp(state.speed, -MAX_SPEED * 1.5, MAX_SPEED * 1.5);
+
                 const forwardX = Math.sin(state.rotation);
                 const forwardZ = Math.cos(state.rotation);
-                const targetVx = forwardX * state.speed;
-                const targetVz = forwardZ * state.speed;
+                const targetVx = forwardX * clampedSpeed;
+                const targetVz = forwardZ * clampedSpeed;
 
                 // 2. Blend current velocity with target velocity
-                // A factor of 0.5 gives a balance between "sticking to rail" and "bouncing off walls".
-                // Higher blend = stiffer control, less bounce. Lower blend = more "loose".
-                // 0.5 is a good starting point for responsive yet physical feel.
-                const blend = 0.5;
+                // Use TIME-DEPENDENT blend to be FPS independent
+                const stiffness = 8; // Higher = tighter tracking of core
+                const blend = 1 - Math.exp(-stiffness * delta);
+
                 const newVx = THREE.MathUtils.lerp(currentV.x, targetVx, blend);
                 const newVz = THREE.MathUtils.lerp(currentV.z, targetVz, blend);
 
@@ -402,10 +382,13 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 rot = state.rotation;
             } else {
                 // Fallback if state is null (e.g. not initialized)
-                // Just use current body position to avoid crashes
                 const t = body.translation();
                 tx = t.x; ty = t.y; tz = t.z;
                 rot = currentRotation.current;
+
+                // Fallback speed from body velocity
+                const v = body.linvel();
+                currentSpeed.current = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
             }
         } else {
             // Remote players or fallback

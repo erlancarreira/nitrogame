@@ -14,21 +14,22 @@
 export interface PlayerInput {
   /** Número do frame (60fps = 1 frame ~16.6ms) */
   frame: number;
-  
+
   /** Acelerador (0-1) */
   throttle: number;
-  
+
   /** Direção (-1 esquerda, 0 reto, 1 direita) */
   steer: number;
-  
+
   /** Freio/drift */
   brake: boolean;
-  
+
   /** Usar item */
   useItem: boolean;
-  
+
   /** Timestamp local quando o input foi gerado */
   timestamp: number;
+
 }
 
 /**
@@ -37,28 +38,28 @@ export interface PlayerInput {
 export interface PlayerState {
   /** ID do jogador */
   id: string;
-  
+
   /** Posição [x, y, z] */
   position: [number, number, number];
-  
+
   /** Rotação (em radianos, eixo Y) */
   rotation: number;
-  
+
   /** Velocidade atual */
   speed: number;
-  
+
   /** Velocidade vetorial [x, y, z] */
   velocity: [number, number, number];
-  
+
   /** Progresso na volta (0-1) */
   lapProgress: number;
-  
+
   /** Volta atual */
   lap: number;
-  
+
   /** Frame correspondente a este estado */
   frame: number;
-  
+
   /** Timestamp do servidor */
   serverTime: number;
 }
@@ -70,10 +71,10 @@ export interface PlayerState {
 export interface GameSnapshot {
   /** Número do frame */
   frame: number;
-  
+
   /** Timestamp do servidor */
   serverTime: number;
-  
+
   /** Estados de todos os jogadores */
   players: Record<string, PlayerState>;
 }
@@ -86,7 +87,7 @@ export interface GameSnapshot {
 export interface InputEvent {
   /** Código da sala */
   roomCode: string;
-  
+
   /** Input do jogador */
   input: PlayerInput;
 }
@@ -97,7 +98,7 @@ export interface InputEvent {
 export interface SnapshotEvent {
   /** Snapshot do estado do jogo */
   snapshot: GameSnapshot;
-  
+
   /** Último frame processado do jogador local (para reconciliation) */
   lastProcessedFrame: number;
 }
@@ -109,7 +110,7 @@ export interface SnapshotEvent {
  */
 export interface PendingInput {
   input: PlayerInput;
-  
+
   /** Estado previsto após aplicar este input */
   predictedState: PlayerState;
 }
@@ -120,10 +121,10 @@ export interface PendingInput {
 export interface InputBuffer {
   /** Inputs enviados mas não confirmados */
   pending: PendingInput[];
-  
+
   /** Último frame confirmado pelo servidor */
   lastConfirmedFrame: number;
-  
+
   /** Último frame enviado */
   lastSentFrame: number;
 }
@@ -152,10 +153,10 @@ export const FRAME_INTERVAL = 1000 / SIMULATION_RATE;
 export const INTERPOLATION_DELAY = 0.1;
 
 /** Máximo de inputs pendentes no buffer */
-export const MAX_PENDING_INPUTS = 120; // ~2 segundos
+export const MAX_PENDING_INPUTS = 300; // ~5 segundos para tolerar lag spikes
 
 /** Taxa de envio de inputs para o servidor (Hz) */
-export const INPUT_SEND_RATE = 30;
+export const INPUT_SEND_RATE = 60;
 
 /** Taxa de broadcast de snapshots do servidor (Hz) */
 export const SNAPSHOT_RATE = 20;

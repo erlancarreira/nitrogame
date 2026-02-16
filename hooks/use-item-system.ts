@@ -32,10 +32,10 @@ interface UseItemSystemOptions {
 }
 
 const DROP_BACK_DIST = 4;      // tenta 4 ou 5
-const DROP_OIL_DIST  = 4;
-const DROP_HEIGHT    = 0.4;
-const OIL_HEIGHT     = 0.05;
-let _shellIdCounter  = 0;
+const DROP_OIL_DIST = 4;
+const DROP_HEIGHT = 0.4;
+const OIL_HEIGHT = 0.05;
+let _shellIdCounter = 0;
 
 // ── Hook ────────────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ export function useItemSystem({
         const rot = bot.getRotation();
         const target = getTargetFor(botId);
         spawnShell({
-          id: `shell_${++_shellIdCounter}`,
+          id: `shell_${botId}_${Date.now()}_${++_shellIdCounter}`,
           ownerId: botId,
           targetId: target,
           startPosition: [
@@ -207,41 +207,79 @@ export function useItemSystem({
     [racerStatesRef, useBotItem]
   );
 
-  // ── Collision Handlers ──
+
+  // ── Collision Handlers (Authority: VICTIM reports hit) ──
 
   const handleBananaCollide = useCallback((bananaId: string, kartId: string) => {
+    // 1. Always despawn visually locally immediately (prediction)
     bananaPoolRef.current?.despawn(bananaId);
 
+    // 2. Authority Check: Only the VICTIM broadcasts the hit.
+    // If I hit it, I tell the world.
     if (kartId === humanPlayerIdRef.current) {
       kartRef.current?.spinOut();
       sfxRef.current?.play("banana_hit");
       sfxRef.current?.play("spin_out");
-    } else if (botRefs.current[kartId]) {
-      botRefs.current[kartId].spinOut();
-    } else {
-      networkManager.broadcast({ type: "ITEM_HIT", targetId: kartId, effect: "spinOut" });
+
+      // Broadcast Hit + Despawn Command
+      networkManager.broadcast({
+        type: "ITEM_HIT",
+        targetId: kartId,
+        effect: "spinOut",
+        itemId: bananaId,
+        itemType: "banana"
+      });
     }
+    // If Bot hit + I am Host -> I am Authority for Bot
+    else if (networkManager.isHost && botRefs.current[kartId]) {
+      botRefs.current[kartId].spinOut();
+      networkManager.broadcast({
+        type: "ITEM_HIT",
+        targetId: kartId,
+        effect: "spinOut",
+        itemId: bananaId,
+        itemType: "banana"
+      });
+    }
+    // Else: Remote player hit it. I see it, but I stay silent. 
+    // I wait for their "ITEM_HIT" message to confirm and despawn it remotely.
   }, [kartRef, botRefs]);
 
-  const handleOilCollide = useCallback((_oilId: string, kartId: string) => {
+  const handleOilCollide = useCallback((oilId: string, kartId: string) => {
+    // Oils don't always despawn (cooldown), but let's assume persistent for now (no despawn call here usually)
+    // If we want to despawn, add it. Logic below assumes persistent oil.
+
     if (kartId === humanPlayerIdRef.current) {
       kartRef.current?.applyOilSlip?.(2.5);
-    } else if (botRefs.current[kartId]) {
+      networkManager.broadcast({ type: "ITEM_HIT", targetId: kartId, effect: "oilSlip" });
+    } else if (networkManager.isHost && botRefs.current[kartId]) {
       botRefs.current[kartId].applyOilSlip?.(2.5);
-    } else {
       networkManager.broadcast({ type: "ITEM_HIT", targetId: kartId, effect: "oilSlip" });
     }
   }, [kartRef, botRefs]);
 
   const handleShellCollide = useCallback((targetId: string, shellId: string) => {
     despawnShell(shellId);
+
     if (targetId === humanPlayerIdRef.current) {
       kartRef.current?.spinOut();
       sfxRef.current?.play("spin_out");
-    } else if (botRefs.current[targetId]) {
+      networkManager.broadcast({
+        type: "ITEM_HIT",
+        targetId,
+        effect: "spinOut",
+        itemId: shellId,
+        itemType: "shell"
+      });
+    } else if (networkManager.isHost && botRefs.current[targetId]) {
       botRefs.current[targetId].spinOut();
-    } else {
-      networkManager.broadcast({ type: "ITEM_HIT", targetId, effect: "spinOut" });
+      networkManager.broadcast({
+        type: "ITEM_HIT",
+        targetId,
+        effect: "spinOut",
+        itemId: shellId,
+        itemType: "shell"
+      });
     }
   }, [kartRef, botRefs, despawnShell]);
 
@@ -249,16 +287,28 @@ export function useItemSystem({
 
   const handleNetworkItemHit = useCallback(
     (msg: NetworkMessage) => {
-      if (msg.type === "ITEM_HIT" && msg.targetId === humanPlayerIdRef.current) {
-        if (msg.effect === "spinOut") {
-          kartRef.current?.spinOut();
-          sfxRef.current?.play("banana_hit");
-          sfxRef.current?.play("spin_out");
-        } else if (msg.effect === "oilSlip") {
-          kartRef.current?.applyOilSlip?.(2.5);
+      if (msg.type === "ITEM_HIT") {
+        // 1. Apply Effect
+        if (msg.targetId === humanPlayerIdRef.current) {
+          // Double check: Did I already process this? (Local prediction)
+          // Simple idempotent check: If I'm already spinning, maybe ignore?
+          // For now, trust the message (maybe I missed the local trigger).
+          if (msg.effect === "spinOut") {
+            kartRef.current?.spinOut();
+            sfxRef.current?.play("banana_hit"); // Sound
+          } else if (msg.effect === "oilSlip") {
+            kartRef.current?.applyOilSlip?.(2.5);
+          }
         }
-      } else if (msg.type === "SHELL_SPAWN") {
-        // Remote player spawned a shell — add it visually (collision handled by sender)
+
+        // 2. Process Item Despawn (Synced via ID)
+        if (msg.itemId && msg.itemType === "banana") {
+          bananaPoolRef.current?.despawn(msg.itemId);
+        } else if (msg.itemId && msg.itemType === "shell") {
+          despawnShell(msg.itemId);
+        }
+      }
+      else if (msg.type === "SHELL_SPAWN") {
         setRedShells((prev) => {
           if (prev.some((s) => s.id === msg.shell.id)) return prev;
           return [...prev, msg.shell];
@@ -267,8 +317,28 @@ export function useItemSystem({
         setRedShells((prev) => prev.filter((s) => s.id !== msg.shellId));
       }
     },
-    [kartRef]
+    [kartRef, despawnShell]
   );
+
+  // ── State Replication (Sync) ──
+  const getWorldSnapshot = useCallback(() => {
+    return {
+      shells: redShells,
+      bananas: bananaPoolRef.current?.getSnapshot() || [],
+      oils: oilPoolRef.current?.getSnapshot() || []
+    };
+  }, [redShells]);
+
+  const restoreWorldSnapshot = useCallback((data: { shells: any[], bananas: any[], oils: any[] }) => {
+    // 1. Shells
+    setRedShells(data.shells || []);
+    // 2. Bananas
+    if (data.bananas) bananaPoolRef.current?.restoreSnapshot(data.bananas);
+    // 3. Oils
+    if (data.oils) oilPoolRef.current?.restoreSnapshot(data.oils);
+  }, []);
+
+
 
   // ── Human Item Usage Effect ──
 
@@ -295,7 +365,7 @@ export function useItemSystem({
             const rot = kartRef.current.getRotation();
             const target = getTargetFor(humanPlayerIdRef.current || "p1");
             spawnShell({
-              id: `shell_${++_shellIdCounter}`,
+              id: `shell_${humanPlayerIdRef.current || "p1"}_${Date.now()}_${++_shellIdCounter}`,
               ownerId: humanPlayerIdRef.current || "p1",
               targetId: target,
               startPosition: [pos[0] + Math.sin(rot) * 2, 0.5, pos[2] + Math.cos(rot) * 2],
@@ -345,5 +415,8 @@ export function useItemSystem({
     handleShellCollide,
     handleNetworkItemHit,
     useHumanItem,
+    // Sync
+    getWorldSnapshot,
+    restoreWorldSnapshot
   };
 }

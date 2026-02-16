@@ -29,6 +29,8 @@ function getOilShared() {
 export interface OilPoolRef {
     spawn: (position: [number, number, number], ownerId?: string) => void;
     despawn: (id: string) => void;
+    getSnapshot: () => any[];
+    restoreSnapshot: (items: any[]) => void;
 }
 
 interface OilPoolProps {
@@ -163,6 +165,26 @@ export const OilPool = forwardRef<OilPoolRef, OilPoolProps>(({ onCollide }, ref)
                 forceUpdate(n => n + 1);
             }
         },
+        getSnapshot: () => {
+            return poolRef.current.filter(p => p.active).map(p => ({
+                position: p.position,
+                ownerId: p.ownerId
+            }));
+        },
+        restoreSnapshot: (items: any[]) => {
+            poolRef.current.forEach(p => p.active = false);
+            items.forEach(item => {
+                const pool = poolRef.current;
+                const index = pool.findIndex(p => !p.active);
+                if (index === -1) return;
+                const slot = pool[index];
+                slot.active = true;
+                slot.position = item.position;
+                slot.ownerId = item.ownerId;
+                slot.spawnTime = performance.now();
+            });
+            forceUpdate(n => n + 1);
+        }
     }));
 
     const handleCollide = useCallback((oilId: string, kartId: string) => {

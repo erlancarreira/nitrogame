@@ -1,0 +1,17 @@
+tunnel: 347fac86-a3b4-422d-90d6-f26bdb115bcd
+credentials-file: C:\Users\erlan\.cloudflared\347fac86-a3b4-422d-90d6-f26bdb115bcd.json
+
+ingress:
+  # Route Socket.IO directly to Game Server (Port 3001)
+  # This avoids Next.js rewrites and creates a direct, low-latency connection.
+  # REPLACE <your-hostname> with your actual domain (e.g., game.mario-kart.com)
+  - hostname: nitrorush.erlancarreira.com.br
+    path: /socket.io*
+    service: http://localhost:3001
+
+  # Route everything else to the Next.js App (Port 3000)
+  - hostname: nitrorush.erlancarreira.com.br
+    service: http://localhost:3000
+
+  # Catch-all rule (required)
+  - service: http_status:404

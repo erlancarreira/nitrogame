@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, forwardRef, useImperativeHandle, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
-import { RigidBody, CuboidCollider, RapierRigidBody } from "@react-three/rapier";
+import { RigidBody, CuboidCollider, RapierRigidBody, useRapier } from "@react-three/rapier";
 import * as THREE from "three";
 import type { Controls } from "@/lib/game/types";
 import { CarModel } from "./CarModel";
@@ -11,7 +11,7 @@ import { TrackSpline } from "@/lib/game/track-path";
 import { PRESET_STANDARD, type KartPhysicsConfig, type KartPresetId, KART_PRESETS } from "@/lib/game/physics-presets";
 import { KartDriftSmoke, getRearWheelPositions } from "./KartEffects";
 import { PlayerNameTag } from "./PlayerNameTag";
-import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, MAX_DELTA, POSITION_UPDATE_INTERVAL, SPAWN_Y_OFFSET } from "@/lib/game/engine-constants";
+import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, MAX_DELTA, POSITION_UPDATE_INTERVAL, SPAWN_Y_OFFSET, KART_MODEL_OFFSET, PHYSICS_TIMESTEP } from '@/lib/game/engine-constants';
 import { useNetworkPrediction } from "@/hooks/useNetworkPrediction";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -62,11 +62,11 @@ export interface KartRef {
 
 // ── Component ───────────────────────────────────────────────────────
 
-export const KartPro = forwardRef<KartRef, KartProps>(({ 
+export const KartPro = forwardRef<KartRef, KartProps>(({
     id,
     playerName,
     playerColor,
-    position = [0, 1, 0],
+    position = [0, 0, 0],
     initialRotation = 0,
     modelUrl = "/assets/cars/kart.glb",
     modelScale = 1,
@@ -151,10 +151,24 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const REVERSE_SPEED_RATIO = preset.reverseSpeedRatio;
     const SPEED_FACTOR_DIVISOR = preset.speedFactorDivisor;
     const MIN_TURN_SPEED = preset.minTurnSpeed;
-    const BODY_MASS = preset.mass;
+    const BODY_MASS = 1.0;
 
     // Network prediction hook (usado apenas para o jogador local)
     const network = useNetworkPrediction(id, position, !!isLocalPlayer);
+
+    // Raycast Suspension Constants
+    const GROUND_RAY_OFFSET = 1.0;
+    const GROUND_RAY_RANGE = 3.0;
+    const HOVER_HEIGHT = 0.35; // Target height above ground (Collider center is at 0.3)
+    const SPRING_STIFFNESS = 20.0;
+
+    // Rapier World for Raycasting
+    const { world, rapier } = useRapier();
+    const rayRef = useRef<InstanceType<typeof rapier.Ray> | null>(null);
+    const getRay = () => {
+        if (!rayRef.current) rayRef.current = new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
+        return rayRef.current;
+    };
 
     useEffect(() => {
         controlsRef.current = { ...controlsProp };
@@ -217,26 +231,29 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         },
     }));
 
+    const accumulator = useRef(0);
+    const lastUpdateTime = useRef(0);
+
     useFrame((state, delta) => {
         const body = rigidBodyRef.current;
         if (!body) return;
 
-        const dt = Math.min(delta, MAX_DELTA);
+        // --- Network Prediction (Remote Ghost Mode) ---
+        // If this component is somehow used for a remote player (not recommended), 
+        // disable physics and rely on updates.
+        if (!isLocalPlayer) {
+            return;
+        }
 
-        // Pre-race: hold kart in place on the grid (prevent falling/floating)
-        // Gravity still applies so the kart settles on the ground, but we kill
-        // horizontal drift and limit downward velocity to prevent tunneling.
+        // 0. Pre-race grid logic (keep simple, no physics loop needed)
         if (!raceStarted) {
             const vel = body.linvel();
-            // Allow gentle gravity settling but clamp to prevent launch/tunneling
             const clampedVy = Math.max(vel.y, -5);
             body.setLinvel({ x: 0, y: clampedVy, z: 0 }, true);
             body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-            // Keep rotation locked to start direction
             _quat.current.setFromAxisAngle(_axis.current, currentRotation.current);
             body.setRotation(_quat.current, true);
 
-            // Force-cancel drift if it was active when race stopped (prevents stuck drift sound)
             if (isDrifting.current) {
                 isDrifting.current = false;
                 driftTime.current = 0;
@@ -246,217 +263,205 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 onEffectsUpdate?.({ isDrifting: false, isBoosting: boostStrength.current > 1, boostStrength: boostStrength.current, driftTier: 0 });
             }
 
-            // Still fire position updates so remote clients see us on the grid
             const t = body.translation();
             onKartTransformChange?.([t.x, t.y, t.z], currentRotation.current);
-            if (state.clock.getElapsedTime() % POSITION_UPDATE_INTERVAL < dt) {
+
+            // Send position updates for grid alignment (robust clock check)
+            const elapsed = state.clock.getElapsedTime();
+            if (elapsed - lastUpdateTime.current >= POSITION_UPDATE_INTERVAL) {
+                lastUpdateTime.current = elapsed;
                 if (trackSplineRef.current) {
                     progressRef.current = trackSplineRef.current.project(t.x, t.z, progressRef.current);
                 }
                 onPositionUpdate?.(id, [t.x, t.y, t.z], currentRotation.current, 0, progressRef.current);
             }
-            return; // Skip all driving logic
+            return;
         }
 
         const input = controlsRef.current;
-        // Read fresh analog values from touch ref each frame (bypasses React state)
         if (touchControlsRef?.current) {
             input.steerX = touchControlsRef.current.steerX;
             input.throttleY = touchControlsRef.current.throttleY;
         }
 
-        // 1. Read inputs (analog if available, else binary)
-        let throttle = 0;
-        let turn = 0;
+        // 1. Accumulate Time
+        accumulator.current += Math.min(delta, 0.1); // Clamp to 100ms prevents death spiral
 
-        if (raceStarted) {
-            // Throttle: analog joystick Y or binary keys
+        // 2. Physics Steps Loop
+        let numSteps = 0;
+        while (accumulator.current >= PHYSICS_TIMESTEP && numSteps < 10) {
+            accumulator.current -= PHYSICS_TIMESTEP;
+            numSteps++;
+            const dt = PHYSICS_TIMESTEP;
+
+            // --- INPUT LOGIC ---
+            let throttle = 0;
+            let turn = 0;
+
             if (input.throttleY !== undefined && input.throttleY !== 0) {
-                throttle = input.throttleY; // -1..+1
+                throttle = input.throttleY;
             } else {
                 if (input.forward) throttle = 1;
                 if (input.backward) throttle = -1;
             }
 
-            // Steering: analog joystick X or binary keys
             if (input.steerX !== undefined && input.steerX !== 0) {
-                turn = -input.steerX; // negative = right in our system, steerX positive = right
+                turn = -input.steerX;
             } else {
                 if (input.left) turn = 1;
                 if (input.right) turn = -1;
             }
 
-            // Drift activation: need speed + turning + holding drift key
+            // Drift
             const wantsDrift = input.drift && Math.abs(currentSpeed.current) > DRIFT_SPEED_THRESHOLD;
-
             if (wantsDrift && !isDrifting.current && Math.abs(turn) > 0) {
-                // Initiate drift — lock direction based on turn input
                 isDrifting.current = true;
                 driftDirection.current = Math.sign(turn);
                 driftTime.current = 0;
                 driftSlideAngle.current = 0;
             } else if (!wantsDrift && isDrifting.current) {
-                // Released drift — check for boost
                 isDrifting.current = false;
-
-                // Determine boost tier based on drift duration
                 let tier = -1;
                 for (let i = DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
                     if (driftTime.current >= DRIFT_BOOST_TIERS[i]) { tier = i; break; }
                 }
-
                 if (tier >= 0) {
                     boostStrength.current = DRIFT_BOOST_SPEEDS[tier];
                     const dur = DRIFT_BOOST_DURATION[tier];
                     safeTimeout(() => { boostStrength.current = 1; }, dur * 1000);
                 }
-
                 driftTime.current = 0;
                 driftDirection.current = 0;
             } else if (isDrifting.current) {
-                // Accumulate drift time
                 driftTime.current += dt;
             }
-
             wasDrifting.current = isDrifting.current;
-        }
 
-        // Envia input normalizado para o sistema de prediction (apenas jogador local)
-        if (isLocalPlayer) {
-            network.processInput({
-                throttle,
-                steer: turn,
-                brake: throttle < 0,
-                useItem: false,
-            });
-        }
+            if (isLocalPlayer) {
+                network.processInput({ throttle, steer: turn, brake: throttle < 0, useItem: false });
+            }
 
-        // Block input during spin out — player is stunned
-        if (isSpinningOut.current) {
-            throttle = 0;
-            turn = 0;
-        }
+            if (isSpinningOut.current) { throttle = 0; turn = 0; }
 
-        // 2. Speed calculation
-        if (throttle > 0) {
-            currentSpeed.current += ACCEL * boostStrength.current * throttle * dt;
-        } else if (throttle < 0) {
-            currentSpeed.current -= BRAKE * Math.abs(throttle) * dt;
-        } else if (Math.abs(currentSpeed.current) > 0.1) {
-            const sign = Math.sign(currentSpeed.current);
-            currentSpeed.current -= sign * DRAG * dt;
-            if (Math.sign(currentSpeed.current) !== sign) currentSpeed.current = 0;
-        } else {
-            currentSpeed.current = 0;
-        }
+            // --- SPEED CALC ---
+            if (throttle > 0) {
+                currentSpeed.current += ACCEL * boostStrength.current * throttle * dt;
+            } else if (throttle < 0) {
+                currentSpeed.current -= BRAKE * Math.abs(throttle) * dt;
+            } else if (Math.abs(currentSpeed.current) > 0.1) {
+                const sign = Math.sign(currentSpeed.current);
+                currentSpeed.current -= sign * DRAG * dt;
+                if (Math.sign(currentSpeed.current) !== sign) currentSpeed.current = 0;
+            } else {
+                currentSpeed.current = 0;
+            }
 
-        const maxS = MAX_SPEED * boostStrength.current;
-        currentSpeed.current = Math.max(Math.min(currentSpeed.current, maxS), -maxS * REVERSE_SPEED_RATIO);
+            const maxS = MAX_SPEED * boostStrength.current;
+            currentSpeed.current = Math.max(Math.min(currentSpeed.current, maxS), -maxS * REVERSE_SPEED_RATIO);
 
-        // 3. Turning
-        if (Math.abs(turn) > 0 && Math.abs(currentSpeed.current) > MIN_TURN_SPEED) {
-            const speedFactor = Math.min(Math.abs(currentSpeed.current) / SPEED_FACTOR_DIVISOR, 1.0);
-            let driftBonus = 1.0;
-
-            if (isDrifting.current) {
-                driftBonus = DRIFT_TURN_BONUS;
-                // During drift, the locked direction adds a constant turn bias
-                // Player can still steer slightly against the drift direction
-                const driftBias = driftDirection.current * 0.6 * TURN_SPEED * speedFactor * dt;
+            // --- TURNING & EFFECTS ---
+            if (Math.abs(turn) > 0 && Math.abs(currentSpeed.current) > MIN_TURN_SPEED) {
+                const speedFactor = Math.min(Math.abs(currentSpeed.current) / SPEED_FACTOR_DIVISOR, 1.0);
+                let driftBonus = 1.0;
+                if (isDrifting.current) {
+                    driftBonus = DRIFT_TURN_BONUS;
+                    const driftBias = driftDirection.current * 0.6 * TURN_SPEED * speedFactor * dt;
+                    currentRotation.current += driftBias * Math.sign(currentSpeed.current);
+                }
+                const turnAmount = turn * TURN_SPEED * speedFactor * driftBonus * dt;
+                currentRotation.current += turnAmount * Math.sign(currentSpeed.current);
+            } else if (isDrifting.current && Math.abs(currentSpeed.current) > MIN_TURN_SPEED) {
+                const speedFactor = Math.min(Math.abs(currentSpeed.current) / SPEED_FACTOR_DIVISOR, 1.0);
+                const driftBias = driftDirection.current * 0.4 * TURN_SPEED * speedFactor * dt;
                 currentRotation.current += driftBias * Math.sign(currentSpeed.current);
             }
 
-            const turnAmount = turn * TURN_SPEED * speedFactor * driftBonus * dt;
-            const direction = Math.sign(currentSpeed.current);
-            currentRotation.current += turnAmount * direction;
-        } else if (isDrifting.current && Math.abs(currentSpeed.current) > MIN_TURN_SPEED) {
-            // No turn input during drift — still apply drift bias
-            const speedFactor = Math.min(Math.abs(currentSpeed.current) / SPEED_FACTOR_DIVISOR, 1.0);
-            const driftBias = driftDirection.current * 0.4 * TURN_SPEED * speedFactor * dt;
-            currentRotation.current += driftBias * Math.sign(currentSpeed.current);
-        }
-
-        // Oil Slip Effect: Random steering noise
-        if (isOilSlipping.current) {
-            oilSlipTime.current += dt;
-            // Oscillate steering wildly
-            const slipNoise = Math.sin(oilSlipTime.current * 15) * 3.0; // Fast oscillation
-            currentRotation.current += slipNoise * dt;
-        }
-
-        // Spin Out Effect: fast 360° spin + locked controls (Mario Kart style)
-        if (isSpinningOut.current) {
-            spinOutTime.current += dt;
-            // Spin 2 full rotations over the duration (720°)
-            const spinSpeed = (2 * Math.PI * 2) / spinOutDuration; // 2 rotations per spinOutDuration
-            currentRotation.current += spinSpeed * dt;
-            // During spin: heavily slow down, ignore player input
-            currentSpeed.current *= Math.max(0, 1 - 3 * dt);
-
-            if (spinOutTime.current >= spinOutDuration) {
-                isSpinningOut.current = false;
-                spinOutTime.current = 0;
+            if (isOilSlipping.current) {
+                oilSlipTime.current += dt;
+                const slipNoise = Math.sin(oilSlipTime.current * 15) * 3.0;
+                currentRotation.current += slipNoise * dt;
             }
-            // Skip turning logic below — player is stunned
+
+            if (isSpinningOut.current) {
+                spinOutTime.current += dt;
+                const spinSpeed = (2 * Math.PI * 2) / spinOutDuration;
+                currentRotation.current += spinSpeed * dt;
+                currentSpeed.current *= Math.max(0, 1 - 3 * dt);
+                if (spinOutTime.current >= spinOutDuration) {
+                    isSpinningOut.current = false;
+                    spinOutTime.current = 0;
+                }
+            }
+
+            // Drift Slide Angle
+            if (isDrifting.current) {
+                driftSlideAngle.current = Math.min(driftSlideAngle.current + dt * 3.0, 1.0);
+            } else {
+                driftSlideAngle.current *= Math.max(0, 1 - 8 * dt);
+            }
+
+            // Smoke Ratio
+            if (isDrifting.current) {
+                slipRatioRef.current = Math.min(Math.abs(currentSpeed.current) / MAX_SPEED, 1);
+            } else {
+                slipRatioRef.current *= Math.max(0, 1 - 5 * dt);
+                if (slipRatioRef.current < 0.01) slipRatioRef.current = 0;
+            }
+
+            // Visual Steering reference
+            steeringValRef.current = turn;
         }
 
-        // 4. Apply movement (kinematic-style on dynamic body)
+        // --- 3. Render / Visual Integration ---
+
+        // Calculate Velocity for Rapier (using Final State)
         const forwardX = Math.sin(currentRotation.current);
         const forwardZ = Math.cos(currentRotation.current);
         const currentVel = body.linvel();
 
-        // During drift, add lateral slide component (sideways motion)
         let vx = forwardX * currentSpeed.current;
         let vz = forwardZ * currentSpeed.current;
 
-        if (isDrifting.current) {
-            // Build up slide angle over time for satisfying drift feel
-            driftSlideAngle.current = Math.min(driftSlideAngle.current + dt * 3.0, 1.0);
+        if (isDrifting.current || driftSlideAngle.current > 0.01) {
             const slideStrength = DRIFT_SLIDE_FACTOR * driftSlideAngle.current * currentSpeed.current;
-            // Perpendicular to forward: rotate 90° -> (forwardZ, -forwardX) for right
             const slideDir = -driftDirection.current;
-            vx += forwardZ * slideDir * slideStrength;
-            vz += -forwardX * slideDir * slideStrength;
-        } else {
-            // Fade out slide angle when not drifting
-            driftSlideAngle.current *= Math.max(0, 1 - 8 * dt);
+            // Only apply slide if we were drifting or fading out
+            if (driftDirection.current !== 0) {
+                vx += forwardZ * slideDir * slideStrength;
+                vz += -forwardX * slideDir * slideStrength;
+            }
         }
 
-        // Stabilize vertical velocity to prevent micro-bouncing
+        // Vertical Damping (Visual only, per render frame)
+        // Keep using render delta for damping to be smooth? Or fixed?
+        // Using fixed step integration for vertical velocity requires storing `vy` state.
+        // Currently `vy` is read from body.
+        // Let's stick to dampStep based on render delta for suspension, as it reacts to terrain.
+        const dampStep = Math.min(delta, 0.1);
         let vy = currentVel.y;
-        if (Math.abs(vy) < 2.0) {
-            vy *= 0.8;
-        }
+        if (vy > 0 && vy < 1.0) vy *= 0.5;
         vy = Math.max(vy, -30);
 
         body.setLinvel({ x: vx, y: vy, z: vz }, true);
-
         _quat.current.setFromAxisAngle(_axis.current, currentRotation.current);
         body.setRotation(_quat.current, true);
         body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
-        // 5. Visual steering & feedback
-        steeringValRef.current = turn;
         onSpeedChange?.(Math.abs(currentSpeed.current));
 
-        // Camera transform — EVERY frame for smooth following
+        // Camera & Transform Broadcast
         let t = body.translation();
-        let tx = t.x;
-        let ty = t.y;
-        let tz = t.z;
+        let tx = t.x, ty = t.y, tz = t.z;
         let rot = currentRotation.current;
 
-        // Integra prediction/reconciliation do hook no jogador local
+        // Prediction/Reconciliation (Visual Only)
         if (isLocalPlayer) {
             const phys = network.getPhysicsState();
             if (phys) {
-                const blend = 0.10; // 0 = ignora prediction, 1 = segue 100%
-
+                const blend = 0;
                 tx = THREE.MathUtils.lerp(tx, phys.position[0], blend);
                 tz = THREE.MathUtils.lerp(tz, phys.position[2], blend);
                 rot = THREE.MathUtils.lerp(rot, phys.rotation, blend);
-
-                // Empurra o corpo de física para perto do estado previsto
                 body.setTranslation({ x: tx, y: ty, z: tz }, true);
                 _quat.current.setFromAxisAngle(_axis.current, rot);
                 body.setRotation(_quat.current, true);
@@ -466,39 +471,29 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
 
         onKartTransformChange?.([tx, ty, tz], rot);
 
-        // Throttled position update for network/minimap
-        if (state.clock.getElapsedTime() % POSITION_UPDATE_INTERVAL < dt) {
+        // Network Position Update (Robut Date Check)
+        const elapsed = state.clock.getElapsedTime();
+        if (elapsed - lastUpdateTime.current >= POSITION_UPDATE_INTERVAL) {
+            lastUpdateTime.current = elapsed;
             if (trackSplineRef.current) {
                 progressRef.current = trackSplineRef.current.project(tx, tz, progressRef.current);
             }
-
             onPositionUpdate?.(id, [tx, ty, tz], rot, Math.abs(currentSpeed.current), progressRef.current);
         }
 
-        // Slip ratio for smoke — fade out gradually when drift ends
-        if (isDrifting.current) {
-            slipRatioRef.current = Math.min(Math.abs(currentSpeed.current) / MAX_SPEED, 1);
-        } else {
-            slipRatioRef.current *= Math.max(0, 1 - 5 * dt); // fadeout
-            if (slipRatioRef.current < 0.01) slipRatioRef.current = 0;
-        }
-
-        // Determine drift tier for UI feedback (could color the smoke)
+        // Effects Update
         let currentTier = 0;
         if (isDrifting.current) {
             for (let i = DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
                 if (driftTime.current >= DRIFT_BOOST_TIERS[i]) { currentTier = i + 1; break; }
             }
         }
-
         onEffectsUpdate?.({
             isDrifting: isDrifting.current,
             isBoosting: boostStrength.current > 1,
             boostStrength: boostStrength.current,
             driftTier: currentTier,
         });
-
-        // Pass invincibility state up? Not for now, maybe visual later
 
     });
 
@@ -511,39 +506,77 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     }, []);
 
     return (
+        // <RigidBody
+        //     ref={rigidBodyRef}
+        //     name={id}
+        //     position={[position[0], position[1] + SPAWN_Y_OFFSET, position[2]]}
+        //     rotation={[0, initialRotation, 0]}
+        //     type="dynamic"
+        //     colliders={false}
+        //     mass={BODY_MASS}
+        //     lockRotations
+        //     linearDamping={0}
+        //     angularDamping={0}
+        //     friction={0}
+        //     restitution={0}
+        // >
+        //     <CuboidCollider
+        //         args={COLLIDER_HALF_EXTENTS}
+        //         position={COLLIDER_OFFSET}
+        //         friction={0}
+        //         restitution={0}
+        //     />
+
+        //     <group ref={groupRef}>
+        //         <CarModel
+        //             url={modelUrl || ""}
+        //             scale={modelScale}
+        //             steeringRef={steeringValRef}
+        //         />
+        //         {/* Fumaça nos pneus traseiros durante drift */}
+        //         <KartDriftSmoke
+        //             slipRatioRef={slipRatioRef}
+        //             rearWheelPositions={getRearWheelPositions(modelUrl)}
+        //         />
+        //         {/* Nome flutuante acima do kart */}
+        //         {playerName && (
+        //             <PlayerNameTag name={playerName} color={playerColor} />
+        //         )}
+        //     </group>
+        // </RigidBody>
+
+
+
         <RigidBody
             ref={rigidBodyRef}
             name={id}
-            position={[position[0], position[1] + SPAWN_Y_OFFSET, position[2]]}
+            position={[position[0], position[1], position[2]]}
             rotation={[0, initialRotation, 0]}
-            type="dynamic"
-            colliders={false}
+            type="dynamic"          // vamos manter dynamic para física completa
+            colliders={false}       // collider explícito
             mass={BODY_MASS}
-            lockRotations
-            linearDamping={0}
-            angularDamping={0}
-            friction={0}
-            restitution={0}
+            lockRotations           // só gira em Y
+            gravityScale={1}        // Enable gravity so it settles on track
+            linearDamping={2}       // freio natural
+            angularDamping={5}      // evita rodar demais
         >
             <CuboidCollider
                 args={COLLIDER_HALF_EXTENTS}
                 position={COLLIDER_OFFSET}
-                friction={0}
+                friction={0.5}
                 restitution={0}
             />
 
-            <group ref={groupRef}>
+            <group ref={groupRef} position={KART_MODEL_OFFSET}>
                 <CarModel
                     url={modelUrl || ""}
                     scale={modelScale}
                     steeringRef={steeringValRef}
                 />
-                {/* Fumaça nos pneus traseiros durante drift */}
                 <KartDriftSmoke
                     slipRatioRef={slipRatioRef}
                     rearWheelPositions={getRearWheelPositions(modelUrl)}
                 />
-                {/* Nome flutuante acima do kart */}
                 {playerName && (
                     <PlayerNameTag name={playerName} color={playerColor} />
                 )}

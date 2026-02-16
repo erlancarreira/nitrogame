@@ -1,6 +1,8 @@
 import { io, Socket } from "socket.io-client";
 import { Player } from "./types";
 import type { GameSnapshot, PlayerInput } from "../../types/network";
+import { Telemetry } from "./telemetry";
+import { netClock } from "../netcode/netclock";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 function devLog(...args: unknown[]) { if (IS_DEV) console.log(...args); }
@@ -13,12 +15,15 @@ export type NetworkMessage =
     | { type: "PLAYER_UPDATE"; player: Player }
     | { type: "START_GAME"; mapId: string; laps: number; players: Player[]; raceStartTime?: number }
     | { type: "KICK_PLAYER"; playerId: string }
-    | { type: "POS"; id: string; p: [number, number, number]; r: number; s: number; l: number; t: number }
-    | { type: "ITEM_HIT"; targetId: string; effect: "spinOut" | "oilSlip" | "boost" }
+    | { type: "POS"; id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq?: number }
+    | { type: "ITEM_HIT"; targetId: string; effect: "spinOut" | "oilSlip" | "boost"; itemId?: string; itemType?: "banana" | "oil" | "shell" }
     | { type: "PLAYER_FINISHED"; id: string; finishTime: number; lap: number }
     | { type: "SHELL_SPAWN"; shell: { id: string; ownerId: string; targetId: string | null; startPosition: [number, number, number]; startRotation: number } }
     | { type: "SHELL_DESPAWN"; shellId: string }
-    | { type: "GAME_SNAPSHOT"; snapshot: GameSnapshot; lastProcessedFrame: number };
+    | { type: "GAME_SNAPSHOT"; snapshot: GameSnapshot; lastProcessedFrame: number }
+    // Entity Replication
+    | { type: "REQUEST_WORLD_STATE" }
+    | { type: "WORLD_STATE_SYNC"; shells: any[]; bananas: any[]; oils: any[] };
 
 export interface LobbySettings {
     mapId: string;
@@ -58,17 +63,18 @@ const isRunningRemote = typeof window !== "undefined" && window.location.hostnam
 
 const SERVER_URL = (isRunningRemote && isLocalhostConfig)
     ? ""
-    : (envServer || "");
+    : (envServer || (IS_DEV ? "http://localhost:3001" : ""));
 
-// ---- Binary POS Encoding (36 bytes vs ~120 JSON) ----
-// Layout: [marker:1][id_len:1][id:N][x:4][y:4][z:4][rot:4][speed:4][lapProgress:4][timestamp:8]
-// Using Float32 for position/rotation/speed, Float64 for timestamp
+
+// ---- Binary POS Encoding (38 bytes vs ~120 JSON) ----
+// Layout: [marker:1][id_len:1][id:N][x:4][y:4][z:4][rot:4][speed:4][lapProgress:4][timestamp:8][seq:2]
+// Using Float32 for position/rotation/speed, Float64 for timestamp, Uint16 for sequence
 
 const POS_HEADER = 0x50; // 'P' ASCII — magic byte to identify binary POS packets
 
-function encodePosMessage(msg: { id: string; p: [number, number, number]; r: number; s: number; l: number; t: number }): ArrayBuffer {
+function encodePosMessage(msg: { id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq: number }): ArrayBuffer {
     const idBytes = new TextEncoder().encode(msg.id);
-    const buf = new ArrayBuffer(2 + idBytes.length + 32); // 1+1+id+6*Float32(24)+Float64(8)=32
+    const buf = new ArrayBuffer(2 + idBytes.length + 32 + 2); // Added 2 bytes for seq
     const view = new DataView(buf);
     let offset = 0;
 
@@ -83,14 +89,15 @@ function encodePosMessage(msg: { id: string; p: [number, number, number]; r: num
     view.setFloat32(offset, msg.r, true); offset += 4;
     view.setFloat32(offset, msg.s, true); offset += 4;
     view.setFloat32(offset, msg.l, true); offset += 4;
-    view.setFloat64(offset, msg.t, true); // offset += 8;
+    view.setFloat64(offset, msg.t, true); offset += 8;
+    view.setUint16(offset, msg.seq || 0, true); // offset += 2;
 
     return buf;
 }
 
-function decodePosMessage(buf: ArrayBuffer): { type: "POS"; id: string; p: [number, number, number]; r: number; s: number; l: number; t: number } | null {
+function decodePosMessage(buf: ArrayBuffer): { type: "POS"; id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq: number } | null {
     const view = new DataView(buf);
-    if (view.byteLength < 4 || view.getUint8(0) !== POS_HEADER) return null;
+    if (view.byteLength < 6 || view.getUint8(0) !== POS_HEADER) return null; // Min size check increased
 
     let offset = 0;
     offset++; // skip header
@@ -105,9 +112,12 @@ function decodePosMessage(buf: ArrayBuffer): { type: "POS"; id: string; p: [numb
     const r = view.getFloat32(offset, true); offset += 4;
     const s = view.getFloat32(offset, true); offset += 4;
     const l = view.getFloat32(offset, true); offset += 4;
-    const t = view.getFloat64(offset, true); // offset += 8;
+    const t = view.getFloat64(offset, true); offset += 8;
 
-    return { type: "POS", id, p: [x, y, z], r, s, l, t };
+    // Safety check for old packets or malformed
+    const seq = offset + 2 <= view.byteLength ? view.getUint16(offset, true) : 0;
+
+    return { type: "POS", id, p: [x, y, z], r, s, l, t, seq };
 }
 
 export class NetworkManager {
@@ -183,8 +193,7 @@ export class NetworkManager {
     private webrtcReady = new Set<string>();
 
     // Clock synchronization (NTP-style)
-    private clockOffset: number = 0; // serverTime ≈ Date.now() + clockOffset
-    private clockSynced: boolean = false;
+    // removed local clockOffset/clockSynced, delegating to netClock
 
     // Ping measurement
     private _ping: number = -1; // -1 = not measured yet
@@ -215,25 +224,29 @@ export class NetworkManager {
 
     private measurePing(): void {
         if (!this.socket) return;
-        const sendTime = Date.now();
-        this.socket.emit("clock-sync-ping", sendTime, (res: { clientSendTime: number; serverTime: number }) => {
-            this._ping = Date.now() - res.clientSendTime;
+        // Use performance.now() for accurate RTT locally
+        const start = performance.now();
+        this.socket.emit("ping-measure", (serverTime: number) => {
+            const rtt = performance.now() - start;
+            this._ping = rtt;
         });
     }
 
-    /** Get estimated server time (Date.now() adjusted by measured offset). */
+    /** Get estimated server time (performance.now() + offset). */
     getServerTime(): number {
-        return Date.now() + this.clockOffset;
+        return netClock.now;
     }
 
     /** Get raw clock offset in ms. Positive = server clock is ahead of client. */
     getClockOffset(): number {
-        return this.clockOffset;
+        // We can expose netClock's internal offset if needed, but usually just .now is enough
+        // For backwards compat with UI/debug, we can return approximate
+        return netClock.now - performance.now();
     }
 
     /** Whether clock sync has completed at least once. */
     isClockSynced(): boolean {
-        return this.clockSynced;
+        return netClock.isSynced;
     }
 
     /**
@@ -245,15 +258,14 @@ export class NetworkManager {
      * for the duration of a race (~3-5 min).
      */
     async syncClock(samples: number = 5): Promise<number> {
-        if (!this.socket) return this.clockOffset;
+        if (!this.socket) return 0;
 
-        const offsets: number[] = [];
         devLog(`[clock-sync] Starting with ${samples} samples...`);
 
         for (let i = 0; i < samples; i++) {
             try {
                 const offset = await this.pingServer();
-                offsets.push(offset);
+                netClock.addSample(offset);
                 // Small delay between pings to avoid burst
                 if (i < samples - 1) {
                     await new Promise(r => setTimeout(r, 150));
@@ -263,34 +275,35 @@ export class NetworkManager {
             }
         }
 
-        if (offsets.length > 0) {
-            // Median is more robust than mean against outliers (network spikes)
-            const filtered = offsets.filter(o => Math.abs(o) < 1000);
-            const sorted = [...filtered].sort((a, b) => a - b);
-            const mid = Math.floor(sorted.length / 2);
-            this.clockOffset = sorted.length % 2 === 0
-                ? (sorted[mid - 1] + sorted[mid]) / 2
-                : sorted[mid];
-            this.clockSynced = true;
-            devLog(`[clock-sync] Done. Offset: ${this.clockOffset.toFixed(1)}ms (${offsets.length}/${samples} samples)`);
-        }
-
-        return this.clockOffset;
+        devLog(`[clock-sync] Done. Offset: ${this.getClockOffset().toFixed(1)}ms`);
+        return this.getClockOffset();
     }
 
     private pingServer(): Promise<number> {
         return new Promise((resolve, reject) => {
             if (!this.socket) return reject("no socket");
-            const clientSendTime = Date.now();
+
+            // Use performance.now() for local monotonicity
+            const clientSendTime = performance.now();
             const timeout = setTimeout(() => reject("timeout"), 3000);
 
+            // Accessing internal socket to emit manually
             this.socket.emit("clock-sync-ping", clientSendTime, (res: { clientSendTime: number; serverTime: number }) => {
                 clearTimeout(timeout);
-                const clientRecvTime = Date.now();
-                const rtt = clientRecvTime - res.clientSendTime;
-                // offset = serverTime - clientMidpoint
-                // clientMidpoint = clientSendTime + rtt/2
-                const offset = res.serverTime - (res.clientSendTime + rtt / 2);
+                const clientRecvTime = performance.now();
+                const rtt = clientRecvTime - clientSendTime;
+
+                // offset = serverTime - (clientSendTime + rtt/2)
+                // clientSendTime is NOW performance.now() based on when we sent it
+                // BUT server expects us to send a number it echoes back.
+
+                // IMPORTANT: The server likely echoes back what we sent. 
+                // We must calculate offset relative to performance.now().
+
+                // If serverTime is Wall Clock (e.g. 1739...), then
+                // offset = 1739... - (p.now() + rtt/2)
+
+                const offset = res.serverTime - (clientSendTime + rtt / 2);
                 resolve(offset);
             });
         });
@@ -305,7 +318,7 @@ export class NetworkManager {
             }
 
             this.socket = io(SERVER_URL, {
-                transports: ["websocket", "polling"],
+                transports: ["websocket"], // Force WebSocket only (no polling) for max performance
                 reconnection: true,
                 reconnectionAttempts: 5,
                 timeout: 10000,
@@ -397,7 +410,7 @@ export class NetworkManager {
 
     // Envia input de jogador (para prediction/reconciliation do servidor)
     emitPlayerInput(input: PlayerInput): void {
-        this.socket?.volatile.emit("player-input", { code: this.roomCode, input });
+        this.socket?.volatile.emit("player-input", { roomCode: this.roomCode, input });
     }
 
     // Send message — POS goes via WebRTC (fallback Socket.IO), rest via Socket.IO
@@ -446,7 +459,7 @@ export class NetworkManager {
         if (msg.type !== "POS") return;
 
         // Try binary via WebRTC first (lower latency + smaller packets)
-        const binary = encodePosMessage(msg);
+        const binary = encodePosMessage({ ...msg, seq: msg.seq || 0 });
 
         for (const [, dc] of this.dataChannels) {
             if (dc.readyState === "open") {
@@ -458,7 +471,7 @@ export class NetworkManager {
 
         // Always relay via server so peers without RTC still receive updates.
         // Remote clients dedupe by timestamp per id.
-        this.socket?.volatile.emit("pos-relay", { code: this.roomCode, msg });
+        this.socket?.volatile.emit("pos-relay", binary);
     }
 
     // ---- Private: Socket.IO Event Listeners ----
@@ -505,8 +518,15 @@ export class NetworkManager {
         });
 
         // POS relay fallback
-        this.socket.on("pos-relay", (msg: NetworkMessage) => {
-            this.emit("message", msg);
+        this.socket.on("pos-relay", (msg: NetworkMessage | ArrayBuffer) => {
+            if (msg instanceof ArrayBuffer) {
+                const decoded = decodePosMessage(msg);
+                if (decoded) {
+                    this.emit("message", decoded);
+                    return;
+                }
+            }
+            this.emit("message", msg as NetworkMessage);
         });
 
         // Player disconnected

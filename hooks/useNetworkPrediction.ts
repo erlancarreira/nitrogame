@@ -1,6 +1,7 @@
 // hooks/useNetworkPrediction.ts
 
 import { useRef, useCallback, useEffect } from "react";
+import { debugLogger } from "@/lib/debug/logger";
 import {
   PlayerInput,
   PlayerState,
@@ -19,6 +20,71 @@ import {
   normalizeInput,
 } from "@/lib/game/kart-physics-core";
 import { networkManager } from "@/lib/game/networking";
+import { netClock } from "@/lib/netcode/netclock";
+
+function smoothTowards(
+  a: KartPhysicsState,
+  b: KartPhysicsState,
+  factor: number
+): KartPhysicsState {
+  return {
+    ...a,
+
+    position: [
+      a.position[0] + (b.position[0] - a.position[0]) * factor,
+      a.position[1] + (b.position[1] - a.position[1]) * factor,
+      a.position[2] + (b.position[2] - a.position[2]) * factor,
+    ],
+
+    rotation:
+      a.rotation + (b.rotation - a.rotation) * factor,
+
+    velocity: [
+      a.velocity[0] + (b.velocity[0] - a.velocity[0]) * factor,
+      a.velocity[1] + (b.velocity[1] - a.velocity[1]) * factor,
+      a.velocity[2] + (b.velocity[2] - a.velocity[2]) * factor,
+    ],
+
+    speed: b.speed,
+    lap: b.lap,
+    lapProgress: b.lapProgress,
+
+    // flags sincronizam direto (não interpolar boolean)
+    isDrifting: b.isDrifting,
+    driftTime: b.driftTime,
+    driftDirection: b.driftDirection,
+    driftSlideAngle: b.driftSlideAngle,
+    boostStrength: b.boostStrength,
+    isInvincible: b.isInvincible,
+    isOilSlipping: b.isOilSlipping,
+    oilSlipTime: b.oilSlipTime,
+    isSpinningOut: b.isSpinningOut,
+    spinOutTime: b.spinOutTime,
+  };
+}
+
+
+
+
+const MICRO_CORRECTION_THRESHOLD_SQ = 0.01; // 10cm squared (0.1 * 0.1)
+const SNAP_THRESHOLD_SQ = 1.0; // 1m squared
+
+function calculateDistSq(posA: number[], posB: number[]) {
+  const dx = posA[0] - posB[0];
+  const dy = posA[1] - posB[1];
+  const dz = posA[2] - posB[2];
+  return dx * dx + dy * dy + dz * dz;
+}
+
+function physicsStateToLoggable(state: KartPhysicsState) {
+  return {
+    position: { x: state.position[0], y: state.position[1], z: state.position[2] },
+    velocity: { x: state.velocity[0], y: state.velocity[1], z: state.velocity[2] },
+    rotation: state.rotation,
+    speed: state.speed
+  };
+}
+
 
 export function useNetworkPrediction(
   kartId: string,
@@ -68,29 +134,19 @@ export function useNetworkPrediction(
   }, []);
 
   const applyInput = useCallback(
-    (state: KartPhysicsState, input: PlayerInput): KartPhysicsState => {
+    (state: KartPhysicsState, input: PlayerInput, dt: number): KartPhysicsState => {
       const physicsInput = toPhysicsInput(input);
-      const newState: KartPhysicsState = {
-        ...state,
-        position: [...state.position],
-        velocity: [...state.velocity],
-      };
-      return updateKartPhysics(newState, physicsInput, FRAME_INTERVAL / 1000);
+      const newState = structuredClone(state);
+      return updateKartPhysics(newState, physicsInput, dt);
     },
     [toPhysicsInput]
   );
 
   const reapplyPendingInputs = useCallback(
-    (baseState: KartPhysicsState, lastProcessedFrame: number) => {
-      let state: KartPhysicsState = {
-        ...baseState,
-        position: [...baseState.position],
-        velocity: [...baseState.velocity],
-      };
+    (baseState: KartPhysicsState) => {
+      let state = structuredClone(baseState);
 
-      const inputsToReapply = inputBuffer.current.pending.filter(
-        (p) => p.input.frame > lastProcessedFrame
-      );
+      const inputsToReapply = inputBuffer.current.pending;
 
       // Log rollback length para debug
       const rollbackLength = inputsToReapply.length;
@@ -104,23 +160,20 @@ export function useNetworkPrediction(
               `[net-pred] Rollback muito grande: ${rollbackLength} inputs. Rede instável?`
             );
           }
-        } else if (process.env.NODE_ENV === "development") {
-          console.debug(`[net-pred] rollback ${rollbackLength} inputs`);
         }
       }
 
       for (const pending of inputsToReapply) {
-        state = applyInput(state, pending.input);
+        // Use fixed timestep for replay to ensure determinism matching server
+        state = applyInput(state, pending.input, FRAME_INTERVAL);
+
         pending.predictedState = stateToPlayerState(
           kartId,
           state,
           pending.input.frame,
-          Date.now()
+          netClock.now
         );
       }
-
-      inputBuffer.current.pending = inputsToReapply;
-      inputBuffer.current.lastConfirmedFrame = lastProcessedFrame;
 
       return state;
     },
@@ -129,6 +182,17 @@ export function useNetworkPrediction(
 
   const processInput = useCallback(
     (inputData: Omit<PlayerInput, "frame" | "timestamp">) => {
+      // Rate Limit Input Generation to Network Tick (30Hz)
+      // Use performance.now() for local throttling (monotonic)
+      const now = performance.now();
+      const timeSinceLastInput = now - lastInputSendTime.current;
+      const tickInterval = 1000 / INPUT_SEND_RATE;
+
+      if (timeSinceLastInput < tickInterval) {
+        return null;
+      }
+      lastInputSendTime.current = now;
+
       if (!isLocalPlayer) return null;
 
       currentFrame.current++;
@@ -136,11 +200,11 @@ export function useNetworkPrediction(
       const input: PlayerInput = {
         ...inputData,
         frame: currentFrame.current,
-        timestamp: performance.now(),
+        timestamp: netClock.now,
       };
 
-      // Prediction local
-      const predictedState = applyInput(renderState.current, input);
+      // Prediction local - FORCE FIXED TIMESTEP to match Server
+      const predictedState = applyInput(renderState.current, input, FRAME_INTERVAL);
       renderState.current = predictedState;
 
       // Guarda no buffer
@@ -148,33 +212,25 @@ export function useNetworkPrediction(
         kartId,
         predictedState,
         input.frame,
-        Date.now()
+        netClock.now
       );
       inputBuffer.current.pending.push({
         input,
         predictedState: playerState,
       });
 
-      // Capar buffer quando excede MAX_PENDING_INPUTS
-      if (inputBuffer.current.pending.length > MAX_PENDING_INPUTS) {
-        const excess =
-          inputBuffer.current.pending.length - MAX_PENDING_INPUTS;
-        inputBuffer.current.pending.splice(0, excess);
-
+      // Dynamic Buffer Scaling
+      if (inputBuffer.current.pending.length > 1000) {
         if (process.env.NODE_ENV === "development") {
-          console.warn(
-            `[net-pred] Buffer capado: removidos ${excess} inputs antigos`
-          );
+          console.warn(`[net-pred] Buffer large: ${inputBuffer.current.pending.length}`);
+        }
+        if (inputBuffer.current.pending.length > 2000) {
+          inputBuffer.current.pending.shift();
         }
       }
 
-      // Envio throtllado para o servidor
-      const now = performance.now();
-      if (now - lastInputSendTime.current >= 1000 / INPUT_SEND_RATE) {
-        if (networkManager.roomCode) {
-          networkManager.emitPlayerInput(input);
-          lastInputSendTime.current = now;
-        }
+      if (networkManager.roomCode) {
+        networkManager.emitPlayerInput(input);
       }
 
       onStateChangedRef.current?.(playerState);
@@ -185,38 +241,27 @@ export function useNetworkPrediction(
 
   const processSnapshot = useCallback(
     (snapshot: GameSnapshot, lastProcessedFrame: number) => {
+      console.log(
+        "SNAPSHOT CONFIRM",
+        "serverFrame:", snapshot.frame,
+        "lastProcessedFrame:", lastProcessedFrame,
+        "lastConfirmed:", inputBuffer.current.lastConfirmedFrame,
+        "pending:", inputBuffer.current.pending.length
+      );
       if (!isLocalPlayer) return;
 
-      // Garantir monotonicidade de lastProcessedFrame
       const lastConfirmed = inputBuffer.current.lastConfirmedFrame;
-      if (lastProcessedFrame <= lastConfirmed) {
-        if (process.env.NODE_ENV === "development") {
-          console.debug(
-            `[net-pred] Snapshot ignorado: frame ${lastProcessedFrame} <= ${lastConfirmed}`
-          );
-        }
-        return;
-      }
+      if (lastProcessedFrame <= lastConfirmed) return;
 
-      // Detectar servidor parado (possível desync)
-      if (lastProcessedFrame === lastConfirmed) {
-        metricsRef.current.consecutiveZeroProgress++;
-        if (metricsRef.current.consecutiveZeroProgress > 10) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn(
-              "[net-pred] Servidor não progredindo - possível desync"
-            );
-          }
-        }
-      } else {
-        metricsRef.current.consecutiveZeroProgress = 0;
-      }
+      inputBuffer.current.lastConfirmedFrame = lastProcessedFrame;
+
+      
 
       const myState = snapshot.players[kartId];
       if (!myState) return;
 
       const serverPhysicsState: KartPhysicsState = {
-        position: [...myState.position],
+        position: [...myState.position], // Full Server Position
         rotation: myState.rotation,
         speed: myState.speed,
         velocity: [...myState.velocity],
@@ -234,10 +279,26 @@ export function useNetworkPrediction(
         spinOutTime: 0,
       };
 
-      serverState.current = serverPhysicsState;
-
       if (inputBuffer.current.pending.length === 0) {
-        renderState.current = serverPhysicsState;
+        // No pending inputs, just smooth towards server state
+        const oldRenderState = structuredClone(renderState.current);
+        renderState.current = smoothTowards(
+          renderState.current,
+          serverPhysicsState,
+          0.25
+        );
+        debugLogger.log({
+          frame: snapshot.frame,
+          type: "server_correction",
+          id: kartId,
+          delta: Math.sqrt(calculateDistSq(oldRenderState.position, serverPhysicsState.position)),
+          meta: { action: "smooth_no_pending", serverPos: physicsStateToLoggable(serverPhysicsState).position, renderPos: physicsStateToLoggable(renderState.current).position }
+        });
+        serverState.current = serverPhysicsState; // Update serverState reference
+        // IMMEDIATE BUFFER CLEANUP
+        inputBuffer.current.pending = inputBuffer.current.pending.filter(
+          (p) => p.input.frame > lastProcessedFrame
+        );
         onStateChangedRef.current?.(
           stateToPlayerState(
             kartId,
@@ -249,11 +310,84 @@ export function useNetworkPrediction(
         return;
       }
 
-      const reconciledState = reapplyPendingInputs(
-        serverPhysicsState,
-        lastProcessedFrame
-      );
-      renderState.current = reconciledState;
+      // Replay remaining inputs on top of server state
+      const replayedState = reapplyPendingInputs(serverPhysicsState);
+
+      // 2. Calculate Error: Compare REPLAYED (what we should be) vs RENDER (what we predicted)
+      const distSq = calculateDistSq(replayedState.position, renderState.current.position);
+
+      // 3. Apply Correction based on Error Magnitude
+      if (distSq < MICRO_CORRECTION_THRESHOLD_SQ) {
+        // A. Micro-error: Ignore it. Trust local prediction to avoid micro-jitters.
+        serverState.current = serverPhysicsState;
+        // renderState.current = replayedState; // DONT SNAP. Keep prediction smoothness.
+
+        debugLogger.log({
+          frame: snapshot.frame,
+          type: "server_correction",
+          id: kartId,
+          delta: Math.sqrt(distSq),
+          meta: {
+            action: "ignore_micro",
+            serverPos: physicsStateToLoggable(serverPhysicsState).position,
+            replayPos: physicsStateToLoggable(replayedState).position,
+            renderPos: physicsStateToLoggable(renderState.current).position,
+            pendingInputs: inputBuffer.current.pending.length,
+            firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
+            lastProcessedFrame
+          }
+        });
+        // No state change needed for renderState
+      } else if (distSq > SNAP_THRESHOLD_SQ) {
+        // B. Major error (Teleport/Lag spike): Hard snap.
+        console.warn(`[net-pred] Hard snap mismatch: ${Math.sqrt(distSq).toFixed(2)}m`);
+
+        const oldRenderState = structuredClone(renderState.current); // Capture BEFORE snap
+
+        serverState.current = serverPhysicsState;
+        renderState.current = smoothTowards(
+          renderState.current,
+          replayedState,
+          0.8
+        );
+
+        debugLogger.log({
+          frame: snapshot.frame,
+          type: "server_correction",
+          id: kartId,
+          delta: Math.sqrt(distSq),
+          meta: {
+            action: "hard_snap",
+            serverPos: physicsStateToLoggable(serverPhysicsState).position,
+            replayPos: physicsStateToLoggable(replayedState).position,
+            renderPos: physicsStateToLoggable(oldRenderState).position, // Log the state that caused the error
+            pendingInputs: inputBuffer.current.pending.length,
+            firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
+            lastProcessedFrame
+          }
+        });
+      } else {
+        // C. Medium error: Smooth correction
+        serverState.current = serverPhysicsState;
+        const oldRenderState = structuredClone(renderState.current);
+        renderState.current = smoothTowards(renderState.current, replayedState, 0.5);
+        debugLogger.log({
+          frame: snapshot.frame,
+          type: "server_correction",
+          id: kartId,
+          delta: Math.sqrt(distSq),
+          meta: {
+            action: "smooth",
+            serverPos: physicsStateToLoggable(serverPhysicsState).position,
+            replayPos: physicsStateToLoggable(replayedState).position,
+            oldRenderPos: physicsStateToLoggable(oldRenderState).position,
+            newRenderPos: physicsStateToLoggable(renderState.current).position,
+            pendingInputs: inputBuffer.current.pending.length,
+            firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
+            lastProcessedFrame
+          }
+        });
+      }
 
       onStateChangedRef.current?.(
         stateToPlayerState(
@@ -277,7 +411,7 @@ export function useNetworkPrediction(
       kartId,
       renderState.current,
       currentFrame.current,
-      Date.now()
+      netClock.now
     );
   }, [isLocalPlayer, kartId]);
 
@@ -323,6 +457,7 @@ export function useNetworkPrediction(
 
     const unsubscribe = networkManager.onMessage((msg) => {
       if (msg.type === "GAME_SNAPSHOT") {
+
         processSnapshot(msg.snapshot, msg.lastProcessedFrame);
       }
     });

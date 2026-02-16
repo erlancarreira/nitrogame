@@ -19,6 +19,7 @@ export interface MapConfig {
   textureCrop?: number; // Corte lateral da textura (0 a 0.5) para remover margens
   thumbnail: string;
   startPositions: [number, number, number][];
+  startRotation?: number; // Optional: Explicit start rotation in radians (overrides auto-calculation)
   modelUrl?: string;
   modelScale?: number;
   itemBoxPositions?: [number, number, number][];
@@ -44,15 +45,20 @@ export const MAPS: MapConfig[] = [
     textureCrop: 0.10,     // Corte moderado para remover margens sem muito zoom
     thumbnail: "green",
     startPositions: [
-      [3, 1, -255],      // P1 (Left Lane, 3m back)
-      [3, 1, -245],      // P2 (Right Lane)
-      [8, 1, -255],      // P3
-      [8, 1, -245],      // P4
-      [13, 1, -255],     // P5
-      [13, 1, -245],     // P6
-      [18, 1, -255],     // P7
-      [18, 1, -245],     // P8
+      // Track tangent at start is -X (West). Lateral is Z. Center Z is -250.
+      // Row 1 (Front): X=6. (Shifted back +6m from 0 to be behind line)
+      // Row 2 (Back): X=16.
+      // Lane 1 (Left): Z=-245. Lane 2 (Right): Z=-255. (Assuming facing -X).
+      [6, 1, -245],      // P1 (Row 1, Left)
+      [6, 1, -255],      // P2 (Row 1, Right)
+      [16, 1, -245],     // P3 (Row 2, Left)
+      [16, 1, -255],     // P4 (Row 2, Right)
+      [26, 1, -245],     // P5 (Row 3, Left)
+      [26, 1, -255],     // P6 (Row 3, Right)
+      [36, 1, -245],     // P7 (Row 4, Left)
+      [36, 1, -255],     // P8 (Row 4, Right)
     ],
+    startRotation: -Math.PI / 2, // Face West aligned with track direction
     // itemBoxPositions removed — auto-generated via generateItemBoxPositions()
     // which projects onto the actual track spline (guaranteed on pavement)
   },

@@ -151,7 +151,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const REVERSE_SPEED_RATIO = preset.reverseSpeedRatio;
     const SPEED_FACTOR_DIVISOR = preset.speedFactorDivisor;
     const MIN_TURN_SPEED = preset.minTurnSpeed;
-    const BODY_MASS = 1.0;
+    const BODY_MASS = preset.mass;
 
     // Network prediction hook (usado apenas para o jogador local)
     const network = useNetworkPrediction(id, position, initialRotation, !!isLocalPlayer);
@@ -350,6 +350,13 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 isSpinningOut.current = state.isSpinningOut;
                 spinOutTime.current = state.spinOutTime;
 
+                // Sync smoke effect intensity with core state
+                if (state.isDrifting) {
+                    slipRatioRef.current = Math.min(Math.abs(state.speed) / MAX_SPEED, 1);
+                } else {
+                    slipRatioRef.current = 0;
+                }
+
                 // Apply transform strictly from prediction
                 // Apply transform strictly from prediction (XZ) + Rapier (Y)
                 // No blending needed because this IS the simulation now
@@ -368,7 +375,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
 
                 // Update local variables for camera/broadcast usage
                 tx = state.position[0];
-                ty = state.position[1];
+                ty = currentT.y; // Use Rapier's Y (actual height)
                 tz = state.position[2];
                 rot = state.rotation;
             } else {

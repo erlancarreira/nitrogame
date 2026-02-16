@@ -357,26 +357,48 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                     slipRatioRef.current = 0;
                 }
 
-                // Apply transform strictly from prediction
-                // Apply transform strictly from prediction (XZ) + Rapier (Y)
-                // No blending needed because this IS the simulation now
+                // --- Physics Integration: Velocity Driving (Collision Friendly) ---
+                // Instead of teleporting (setTranslation), we drive the body with target velocity.
+                // This allows Rapier to resolve wall collisions naturally.
+
                 const currentT = body.translation();
                 const currentV = body.linvel();
 
-                // Core controls X/Z (authoritative). Rapier controls Y (gravity/walls).
-                body.setTranslation({ x: state.position[0], y: currentT.y, z: state.position[2] }, true);
+                // 1. Calculate target velocity vector from Core state
+                // state.speed is the magnitude; state.rotation is the direction
+                const forwardX = Math.sin(state.rotation);
+                const forwardZ = Math.cos(state.rotation);
+                const targetVx = forwardX * state.speed;
+                const targetVz = forwardZ * state.speed;
 
+                // 2. Blend current velocity with target velocity
+                // A factor of 0.5 gives a balance between "sticking to rail" and "bouncing off walls".
+                // Higher blend = stiffer control, less bounce. Lower blend = more "loose".
+                // 0.5 is a good starting point for responsive yet physical feel.
+                const blend = 0.5;
+                const newVx = THREE.MathUtils.lerp(currentV.x, targetVx, blend);
+                const newVz = THREE.MathUtils.lerp(currentV.z, targetVz, blend);
+
+                // 3. Apply Velocity
+                // We trust Rapier for Y (gravity/jumps) but drive X/Z to match Core.
+                body.setLinvel({ x: newVx, y: currentV.y, z: newVz }, true);
+
+                // 4. Force Rotation (Visuals)
+                // We still snap rotation because drifting visuals depend heavily on precise angle
                 _quat.current.setFromAxisAngle(_axis.current, state.rotation);
                 body.setRotation(_quat.current, true);
 
-                // Keep vertical velocity from physics engine (gravity/jump), override horizontal
-                body.setLinvel({ x: state.velocity[0], y: currentV.y, z: state.velocity[2] }, true);
+                // 5. Angular Velocity
+                // Zero it out to prevent physics engine from spinning the kart uncontrollably on collision
                 body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
-                // Update local variables for camera/broadcast usage
-                tx = state.position[0];
-                ty = currentT.y; // Use Rapier's Y (actual height)
-                tz = state.position[2];
+                // --- Visual / Camera Sync ---
+                // Use the REAL body position (Rapier) for camera and visuals.
+                // This ensures the camera doesn't clip through walls if the physics body is stopped by one.
+                const finalT = body.translation();
+                tx = finalT.x;
+                ty = finalT.y;
+                tz = finalT.z;
                 rot = state.rotation;
             } else {
                 // Fallback if state is null (e.g. not initialized)

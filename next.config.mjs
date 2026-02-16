@@ -22,14 +22,7 @@ const nextConfig = {
     }
     return [];
   },
-  async rewrites() {
-    return [
-      {
-        source: '/socket.io/:path*',
-        destination: 'http://localhost:3001/socket.io/:path*',
-      },
-    ];
-  },
+
   experimental: {
     serverActions: {
       allowedOrigins: ['localhost:3000', '*.trycloudflare.com', '*.erlancarreira.com.br'],

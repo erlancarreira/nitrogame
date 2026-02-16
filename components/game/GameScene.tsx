@@ -27,8 +27,6 @@ import { DriftSound } from "./DriftSound";
 import { SpatialEngineSound } from "./SpatialEngineSound";
 import { RedShell } from "./RedShell";
 import type { RacerState } from "@/hooks/use-race-state";
-import { interpolator } from "@/lib/game/interpolator";
-import { NetworkInterpolationLoop } from "./NetworkInterpolationLoop";
 
 import { netClock } from "@/lib/netcode/netclock";
 
@@ -347,6 +345,7 @@ export const GameScene = React.memo(function GameScene({
 
           lastSnapshotTimeRef.current.set(id, snapshot.serverTime);
 
+          // Only feed interpolator; RemoteKart + minimapa leem o mesmo estado interpolado
           interpolator.addSnapshot(id, {
             t: snapshot.serverTime,
             p: state.position as [number, number, number],
@@ -368,6 +367,7 @@ export const GameScene = React.memo(function GameScene({
 
         lastSnapshotTimeRef.current.set(msg.id, msg.t);
 
+        // Apenas interpolator; o resto lê via RemoteKart
         interpolator.addSnapshot(msg.id, {
           t: msg.t,
           p: msg.p,
@@ -408,7 +408,7 @@ export const GameScene = React.memo(function GameScene({
     }
 
     return unsub;
-  }, [localPlayerId, handlePositionUpdate, handleNetworkItemHit, onRemoteFinish, getWorldSnapshot, restoreWorldSnapshot]);
+  }, [localPlayerId, handlePositionUpdate, handleNetworkItemHit, onRemoteFinish, getWorldSnapshot, restoreWorldSnapshot, botPlayersHost]);
 
   return (
     <>
@@ -474,6 +474,9 @@ export const GameScene = React.memo(function GameScene({
                 modelUrl={remote.modelUrl || DEFAULT_CAR_MODEL}
                 modelScale={getModelScale(remote.modelUrl || DEFAULT_CAR_MODEL)}
                 color={remote.color}
+                onInterpolatedState={(id, pos, rot, speed, lap) =>
+                  handlePositionUpdate(id, pos, rot, speed, lap)
+                }
               />
             ))}
 
@@ -518,6 +521,9 @@ export const GameScene = React.memo(function GameScene({
                 modelUrl={bot.modelUrl || DEFAULT_CAR_MODEL}
                 modelScale={getModelScale(bot.modelUrl || DEFAULT_CAR_MODEL)}
                 color={bot.color}
+                onInterpolatedState={(id, pos, rot, speed, lap) =>
+                  handlePositionUpdate(id, pos, rot, speed, lap)
+                }
               />
             ))}
             <SceneReadyTrigger onReady={handleSceneReady} />
@@ -589,11 +595,6 @@ export const GameScene = React.memo(function GameScene({
         />
 
         {/* Debug: draw call counter */}
-        <NetworkInterpolationLoop
-          localPlayerId={localPlayerId}
-          ignoredIds={botPlayersHost.map(b => b.id)}
-          handlePositionUpdate={handlePositionUpdate}
-        />
         <DrawCallLogger />
       </Canvas>
       

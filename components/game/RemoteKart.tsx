@@ -20,6 +20,13 @@ interface RemoteKartProps {
     color: string;
     // We keep this prop if needed for non-positional data, but visuals come from interpolator
     racerStatesRef?: React.MutableRefObject<Map<string, RacerState>>;
+    onInterpolatedState?: (
+        id: string,
+        position: [number, number, number],
+        rotation: number,
+        speed: number,
+        lapProgress: number
+    ) => void;
 }
 
 /**
@@ -29,7 +36,14 @@ interface RemoteKartProps {
  * bypassing React state or ref forwarding loops.
  */
 export const RemoteKart = React.memo(function RemoteKart({
-    id, playerName, initialPosition, initialRotation, modelUrl, modelScale, color
+    id,
+    playerName,
+    initialPosition,
+    initialRotation,
+    modelUrl,
+    modelScale,
+    color,
+    onInterpolatedState,
 }: RemoteKartProps) {
     const mountPosition = useRef(initialPosition).current;
     const mountRotation = useRef(initialRotation).current;
@@ -66,6 +80,15 @@ export const RemoteKart = React.memo(function RemoteKart({
             // Kinematic update is instant and smooth
             rigidBodyRef.current.setNextKinematicTranslation(_vec.current);
             rigidBodyRef.current.setNextKinematicRotation(_quat.current);
+
+            // Single source of truth for remote transforms (minimapa, HUD, etc.)
+            onInterpolatedState?.(
+                id,
+                [state.position[0], state.position[1], state.position[2]],
+                state.rotation,
+                state.speed,
+                state.lapProgress
+            );
         }
     });
 

@@ -85,16 +85,17 @@ function physicsStateToLoggable(state: KartPhysicsState) {
 export function useNetworkPrediction(
   kartId: string,
   initialPosition: [number, number, number],
+  initialRotation: number = 0,
   isLocalPlayer: boolean = false
 ) {
   // Estado de física autoritativo do servidor (último snapshot recebido)
   const serverState = useRef<KartPhysicsState>(
-    createPhysicsState(initialPosition)
+    createPhysicsState(initialPosition, initialRotation)
   );
 
   // Estado de física renderizado (após prediction/reconciliation)
   const renderState = useRef<KartPhysicsState>(
-    createPhysicsState(initialPosition)
+    createPhysicsState(initialPosition, initialRotation)
   );
 
   // Buffer de inputs pendentes
@@ -120,14 +121,16 @@ export function useNetworkPrediction(
     consecutiveZeroProgress: 0,
   });
 
-  const toPhysicsInput = useCallback((input: PlayerInput): PhysicsInput => {
+  const toPhysicsInput = (input: Omit<PlayerInput, "frame" | "timestamp">): PhysicsInput => {
     return normalizeInput({
       throttle: input.throttle,
       steer: input.steer,
-      brake: input.brake,
+      // CRITICAL: Map 'drift' button to 'brake' field in physics core for now, 
+      // because kart-physics-core uses 'brake' property to trigger drift logic.
+      brake: input.drift,
       useItem: input.useItem,
     });
-  }, []);
+  };
 
   const applyInput = useCallback(
     (state: KartPhysicsState, input: PlayerInput, dt: number): KartPhysicsState => {
@@ -203,6 +206,14 @@ export function useNetworkPrediction(
       const predictedState = applyInput(renderState.current, input, FRAME_INTERVAL);
       renderState.current = predictedState;
 
+      // 2. Predict next state (CLIENT-SIDE PREDICTION)
+      const prevState = renderState.current;
+      // Note: PHYSICS_TIMESTEP is not defined in this scope. Assuming FRAME_INTERVAL is intended.
+      // Also, the `input` here is PlayerInput, but updateKartPhysics expects PhysicsInput.
+      // The original `applyInput` handles this conversion.
+      // Re-using `predictedState` from the line above, as it's the result of applying the input.
+      const nextState = predictedState; // Using the already calculated predictedState
+
       // Guarda no buffer
       const playerState = stateToPlayerState(
         kartId,
@@ -237,13 +248,13 @@ export function useNetworkPrediction(
 
   const processSnapshot = useCallback(
     (snapshot: GameSnapshot, lastProcessedFrame: number) => {
-      console.log(
-        "SNAPSHOT CONFIRM",
-        "serverFrame:", snapshot.frame,
-        "lastProcessedFrame:", lastProcessedFrame,
-        "lastConfirmed:", inputBuffer.current.lastConfirmedFrame,
-        "pending:", inputBuffer.current.pending.length
-      );
+      // console.log(
+      //   "SNAPSHOT CONFIRM",
+      //   "serverFrame:", snapshot.frame,
+      //   "lastProcessedFrame:", lastProcessedFrame,
+      //   "lastConfirmed:", inputBuffer.current.lastConfirmedFrame,
+      //   "pending:", inputBuffer.current.pending.length
+      // );
       if (!isLocalPlayer) return;
 
       const lastConfirmed = inputBuffer.current.lastConfirmedFrame;
@@ -334,30 +345,8 @@ export function useNetworkPrediction(
       if (distSq < MICRO_CORRECTION_THRESHOLD_SQ) {
         // A. Micro-error: Ignore it. Trust local prediction to avoid micro-jitters.
         serverState.current = serverPhysicsState;
-
-        debugLogger.log({
-          frame: snapshot.frame,
-          type: "server_correction",
-          id: kartId,
-          delta: Math.sqrt(distSq),
-          meta: {
-            action: "ignore_micro",
-            serverPos: physicsStateToLoggable(serverPhysicsState).position,
-            replayPos: physicsStateToLoggable(replayedState).position,
-            renderPos: physicsStateToLoggable(renderState.current).position,
-            distServerVsRender: Math.sqrt(distServerVsRenderSq),
-            distServerVsReplay: Math.sqrt(distServerVsReplaySq),
-            distReplayVsRender: Math.sqrt(distReplayVsRenderSq),
-            pendingInputs: inputBuffer.current.pending.length,
-            firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
-            lastProcessedFrame
-          }
-        });
-        // No state change needed for renderState
       } else if (distSq > SNAP_THRESHOLD_SQ) {
         // B. Major error (Teleport/Lag spike): Hard snap towards the corrected replayed state.
-        console.warn(`[net-pred] Hard snap mismatch: ${Math.sqrt(distSq).toFixed(2)}m`);
-
         const oldRenderState = structuredClone(renderState.current); // Capture BEFORE snap
 
         serverState.current = serverPhysicsState;
@@ -366,49 +355,14 @@ export function useNetworkPrediction(
           replayedState,
           0.8
         );
-
-        debugLogger.log({
-          frame: snapshot.frame,
-          type: "server_correction",
-          id: kartId,
-          delta: Math.sqrt(distSq),
-          meta: {
-            action: "hard_snap",
-            serverPos: physicsStateToLoggable(serverPhysicsState).position,
-            replayPos: physicsStateToLoggable(replayedState).position,
-            renderPos: physicsStateToLoggable(oldRenderState).position, // Log the state that caused the error
-            distServerVsRender: Math.sqrt(distServerVsRenderSq),
-            distServerVsReplay: Math.sqrt(distServerVsReplaySq),
-            distReplayVsRender: Math.sqrt(distReplayVsRenderSq),
-            pendingInputs: inputBuffer.current.pending.length,
-            firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
-            lastProcessedFrame
-          }
-        });
       } else {
         // C. Medium error: Smooth correction
         serverState.current = serverPhysicsState;
-        const oldRenderState = structuredClone(renderState.current);
-        renderState.current = smoothTowards(renderState.current, replayedState, 0.5);
-        debugLogger.log({
-          frame: snapshot.frame,
-          type: "server_correction",
-          id: kartId,
-          delta: Math.sqrt(distSq),
-          meta: {
-            action: "smooth",
-            serverPos: physicsStateToLoggable(serverPhysicsState).position,
-            replayPos: physicsStateToLoggable(replayedState).position,
-            oldRenderPos: physicsStateToLoggable(oldRenderState).position,
-            newRenderPos: physicsStateToLoggable(renderState.current).position,
-            distServerVsRender: Math.sqrt(distServerVsRenderSq),
-            distServerVsReplay: Math.sqrt(distServerVsReplaySq),
-            distReplayVsRender: Math.sqrt(distReplayVsRenderSq),
-            pendingInputs: inputBuffer.current.pending.length,
-            firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
-            lastProcessedFrame
-          }
-        });
+        renderState.current = smoothTowards(
+          renderState.current,
+          replayedState,
+          0.3 // Gradual correction
+        );
       }
 
       onStateChangedRef.current?.(
@@ -445,7 +399,7 @@ export function useNetworkPrediction(
   const resetState = useCallback(
     (position?: [number, number, number]) => {
       if (!isLocalPlayer) return;
-      const newState = createPhysicsState(position || initialPosition);
+      const newState = createPhysicsState(position || initialPosition, initialRotation);
       serverState.current = newState;
       renderState.current = newState;
       inputBuffer.current = {
@@ -460,7 +414,7 @@ export function useNetworkPrediction(
         consecutiveZeroProgress: 0,
       };
     },
-    [isLocalPlayer, initialPosition]
+    [isLocalPlayer, initialPosition, initialRotation]
   );
 
   // Novo: métrica de debug

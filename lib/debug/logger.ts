@@ -3,7 +3,7 @@
 export interface LogEntry {
     frame: number;
     timestamp: number;
-    type: "local" | "remote" | "server_correction" | "input";
+    type: "local" | "remote" | "server_correction" | "input" | "shadow_physics";
     id?: string;
     pos?: { x: number; y: number; z: number };
     rot?: number;

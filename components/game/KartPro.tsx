@@ -154,7 +154,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const BODY_MASS = 1.0;
 
     // Network prediction hook (usado apenas para o jogador local)
-    const network = useNetworkPrediction(id, position, !!isLocalPlayer);
+    const network = useNetworkPrediction(id, position, initialRotation, !!isLocalPlayer);
 
     // Raycast Suspension Constants
     const GROUND_RAY_OFFSET = 1.0;
@@ -285,200 +285,111 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         }
 
         // 1. Accumulate Time
-        accumulator.current += Math.min(delta, 0.1); // Clamp to 100ms prevents death spiral
+        accumulator.current += Math.min(delta, 0.1); // Clamp to 100ms
 
-        // Prepare input values used both by local physics and netcode
+        // --- INPUT LOGIC (Read once per frame) ---
         let throttle = 0;
         let turn = 0;
 
-        // 2. Physics Steps Loop
+        const inputState = controlsRef.current;
+        if (touchControlsRef?.current) {
+            inputState.steerX = touchControlsRef.current.steerX;
+            inputState.throttleY = touchControlsRef.current.throttleY;
+        }
+
+        if (inputState.throttleY !== undefined && inputState.throttleY !== 0) {
+            throttle = inputState.throttleY;
+        } else {
+            if (inputState.forward) throttle = 1;
+            if (inputState.backward) throttle = -1;
+        }
+
+        if (inputState.steerX !== undefined && inputState.steerX !== 0) {
+            turn = -inputState.steerX;
+        } else {
+            if (inputState.left) turn = 1;
+            if (inputState.right) turn = -1;
+        }
+
+        // 2. Physics Steps Loop (Driven by Network Prediction)
         let numSteps = 0;
         while (accumulator.current >= PHYSICS_TIMESTEP && numSteps < 10) {
             accumulator.current -= PHYSICS_TIMESTEP;
             numSteps++;
-            const dt = PHYSICS_TIMESTEP;
 
-            // --- INPUT LOGIC ---
-            throttle = 0;
-            turn = 0;
-
-            if (input.throttleY !== undefined && input.throttleY !== 0) {
-                throttle = input.throttleY;
-            } else {
-                if (input.forward) throttle = 1;
-                if (input.backward) throttle = -1;
-            }
-
-            if (input.steerX !== undefined && input.steerX !== 0) {
-                turn = -input.steerX;
-            } else {
-                if (input.left) turn = 1;
-                if (input.right) turn = -1;
-            }
-
-            // Drift
-            const wantsDrift = input.drift && Math.abs(currentSpeed.current) > DRIFT_SPEED_THRESHOLD;
-            if (wantsDrift && !isDrifting.current && Math.abs(turn) > 0) {
-                isDrifting.current = true;
-                driftDirection.current = Math.sign(turn);
-                driftTime.current = 0;
-                driftSlideAngle.current = 0;
-            } else if (!wantsDrift && isDrifting.current) {
-                isDrifting.current = false;
-                let tier = -1;
-                for (let i = DRIFT_BOOST_Tiers.length - 1; i >= 0; i--) {
-                    if (driftTime.current >= DRIFT_BOOST_Tiers[i]) { tier = i; break; }
-                }
-                if (tier >= 0) {
-                    boostStrength.current = DRIFT_BOOST_SPEEDS[tier];
-                    const dur = DRIFT_BOOST_DURATION[tier];
-                    safeTimeout(() => { boostStrength.current = 1; }, dur * 1000);
-                }
-                driftTime.current = 0;
-                driftDirection.current = 0;
-            } else if (isDrifting.current) {
-                driftTime.current += dt;
-            }
-            wasDrifting.current = isDrifting.current;
-
+            // Block input during spin out (handled in core, but good to clamp here too)
             if (isSpinningOut.current) { throttle = 0; turn = 0; }
 
-            // --- SPEED CALC ---
-            if (throttle > 0) {
-                currentSpeed.current += ACCEL * boostStrength.current * throttle * dt;
-            } else if (throttle < 0) {
-                currentSpeed.current -= BRAKE * Math.abs(throttle) * dt;
-            } else if (Math.abs(currentSpeed.current) > 0.1) {
-                const sign = Math.sign(currentSpeed.current);
-                currentSpeed.current -= sign * DRAG * dt;
-                if (Math.sign(currentSpeed.current) !== sign) currentSpeed.current = 0;
-            } else {
-                currentSpeed.current = 0;
+            // NETWORK INPUT (Ticked sync with physics)
+            if (isLocalPlayer) {
+                network.processInput({
+                    throttle,
+                    steer: turn,
+                    brake: throttle < 0,
+                    drift: !!inputState.drift,
+                    useItem: false,
+                });
             }
-
-            const maxS = MAX_SPEED * boostStrength.current;
-            currentSpeed.current = Math.max(Math.min(currentSpeed.current, maxS), -maxS * REVERSE_SPEED_RATIO);
-
-            // --- TURNING & EFFECTS ---
-            if (Math.abs(turn) > 0 && Math.abs(currentSpeed.current) > MIN_TURN_SPEED) {
-                const speedFactor = Math.min(Math.abs(currentSpeed.current) / SPEED_FACTOR_DIVISOR, 1.0);
-                let driftBonus = 1.0;
-                if (isDrifting.current) {
-                    driftBonus = DRIFT_TURN_BONUS;
-                    const driftBias = driftDirection.current * 0.6 * TURN_SPEED * speedFactor * dt;
-                    currentRotation.current += driftBias * Math.sign(currentSpeed.current);
-                }
-                const turnAmount = turn * TURN_SPEED * speedFactor * driftBonus * dt;
-                currentRotation.current += turnAmount * Math.sign(currentSpeed.current);
-            } else if (isDrifting.current && Math.abs(currentSpeed.current) > MIN_TURN_SPEED) {
-                const speedFactor = Math.min(Math.abs(currentSpeed.current) / SPEED_FACTOR_DIVISOR, 1.0);
-                const driftBias = driftDirection.current * 0.4 * TURN_SPEED * speedFactor * dt;
-                currentRotation.current += driftBias * Math.sign(currentSpeed.current);
-            }
-
-            if (isOilSlipping.current) {
-                oilSlipTime.current += dt;
-                const slipNoise = Math.sin(oilSlipTime.current * 15) * 3.0;
-                currentRotation.current += slipNoise * dt;
-            }
-
-            if (isSpinningOut.current) {
-                spinOutTime.current += dt;
-                const spinSpeed = (2 * Math.PI * 2) / spinOutDuration;
-                currentRotation.current += spinSpeed * dt;
-                currentSpeed.current *= Math.max(0, 1 - 3 * dt);
-                if (spinOutTime.current >= spinOutDuration) {
-                    isSpinningOut.current = false;
-                    spinOutTime.current = 0;
-                }
-            }
-
-            // Drift Slide Angle
-            if (isDrifting.current) {
-                driftSlideAngle.current = Math.min(driftSlideAngle.current + dt * 3.0, 1.0);
-            } else {
-                driftSlideAngle.current *= Math.max(0, 1 - 8 * dt);
-            }
-
-            // Smoke Ratio
-            if (isDrifting.current) {
-                slipRatioRef.current = Math.min(Math.abs(currentSpeed.current) / MAX_SPEED, 1);
-            } else {
-                slipRatioRef.current *= Math.max(0, 1 - 5 * dt);
-                if (slipRatioRef.current < 0.01) slipRatioRef.current = 0;
-            }
-
-            // Visual Steering reference
-            steeringValRef.current = turn;
-        }
-
-        // Envia input para o prediction/core apenas uma vez por frame (desacoplado do substep)
-        if (isLocalPlayer) {
-            network.processInput({
-                throttle,
-                steer: turn,
-                brake: throttle < 0,
-                useItem: false,
-            });
         }
 
         // --- 3. Render / Visual Integration ---
 
-        // Calculate Velocity for Rapier (using Final State)
-        const forwardX = Math.sin(currentRotation.current);
-        const forwardZ = Math.cos(currentRotation.current);
-        const currentVel = body.linvel();
+        let tx = 0, ty = 0, tz = 0, rot = 0;
 
-        let vx = forwardX * currentSpeed.current;
-        let vz = forwardZ * currentSpeed.current;
+        // Single Source of Truth: Use predicted state directly
+        if (isLocalPlayer) {
+            const state = network.getPhysicsState();
 
-        if (isDrifting.current || driftSlideAngle.current > 0.01) {
-            const slideStrength = DRIFT_SLIDE_FACTOR * driftSlideAngle.current * currentSpeed.current;
-            const slideDir = -driftDirection.current;
-            // Only apply slide if we were drifting or fading out
-            if (driftDirection.current !== 0) {
-                vx += forwardZ * slideDir * slideStrength;
-                vz += -forwardX * slideDir * slideStrength;
+            if (state) {
+                // Sync local refs to predicted state for visuals/camera
+                currentSpeed.current = state.speed;
+                currentRotation.current = state.rotation;
+                isDrifting.current = state.isDrifting;
+                driftDirection.current = state.driftDirection;
+                driftTime.current = state.driftTime;
+                driftSlideAngle.current = state.driftSlideAngle;
+                boostStrength.current = state.boostStrength;
+                isOilSlipping.current = state.isOilSlipping;
+                oilSlipTime.current = state.oilSlipTime;
+                isSpinningOut.current = state.isSpinningOut;
+                spinOutTime.current = state.spinOutTime;
+
+                // Apply transform strictly from prediction
+                // No blending needed because this IS the simulation now
+                body.setTranslation({ x: state.position[0], y: state.position[1], z: state.position[2] }, true);
+
+                _quat.current.setFromAxisAngle(_axis.current, state.rotation);
+                body.setRotation(_quat.current, true);
+                body.setLinvel({ x: state.velocity[0], y: state.velocity[1], z: state.velocity[2] }, true);
+                body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+
+                // Update local variables for camera/broadcast usage
+                tx = state.position[0];
+                ty = state.position[1];
+                tz = state.position[2];
+                rot = state.rotation;
+            } else {
+                // Fallback if state is null (e.g. not initialized)
+                // Just use current body position to avoid crashes
+                const t = body.translation();
+                tx = t.x; ty = t.y; tz = t.z;
+                rot = currentRotation.current;
             }
+        } else {
+            // Remote players or fallback
+            const t = body.translation();
+            tx = t.x;
+            ty = t.y;
+            tz = t.z;
+            rot = currentRotation.current;
         }
 
-        // Vertical Damping (Visual only, per render frame)
-        // Keep using render delta for damping to be smooth? Or fixed?
-        // Using fixed step integration for vertical velocity requires storing `vy` state.
-        // Currently `vy` is read from body.
-        // Let's stick to dampStep based on render delta for suspension, as it reacts to terrain.
-        const dampStep = Math.min(delta, 0.1);
-        let vy = currentVel.y;
-        if (vy > 0 && vy < 1.0) vy *= 0.5;
-        vy = Math.max(vy, -30);
-
-        body.setLinvel({ x: vx, y: vy, z: vz }, true);
-        _quat.current.setFromAxisAngle(_axis.current, currentRotation.current);
-        body.setRotation(_quat.current, true);
-        body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        // Clean up: Visual Steering reference
+        steeringValRef.current = turn;
 
         onSpeedChange?.(Math.abs(currentSpeed.current));
 
         // Camera & Transform Broadcast
-        let t = body.translation();
-        let tx = t.x, ty = t.y, tz = t.z;
-        let rot = currentRotation.current;
-
-        // Prediction/Reconciliation (Visual Only)
-        if (isLocalPlayer) {
-            const phys = network.getPhysicsState();
-            if (phys) {
-                const blend = 0;
-                tx = THREE.MathUtils.lerp(tx, phys.position[0], blend);
-                tz = THREE.MathUtils.lerp(tz, phys.position[2], blend);
-                rot = THREE.MathUtils.lerp(rot, phys.rotation, blend);
-                body.setTranslation({ x: tx, y: ty, z: tz }, true);
-                _quat.current.setFromAxisAngle(_axis.current, rot);
-                body.setRotation(_quat.current, true);
-                currentRotation.current = rot;
-            }
-        }
-
         onKartTransformChange?.([tx, ty, tz], rot);
 
         // Network Position Update (Robut Date Check)

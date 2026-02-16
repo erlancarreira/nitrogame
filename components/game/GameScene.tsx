@@ -436,6 +436,7 @@ export const GameScene = React.memo(function GameScene({
             {humanPlayer && (
               <>
                 <Kart
+                  key={`${humanPlayer.id}-${selectedMap.id}`} // Force remount on map change to sync initial position
                   ref={kartRef}
                   id={humanPlayer.id}
                   playerName={humanPlayer.name}
@@ -598,7 +599,7 @@ export const GameScene = React.memo(function GameScene({
         {/* Debug: draw call counter */}
         <DrawCallLogger />
       </Canvas>
-      
+
     </>
   );
 });

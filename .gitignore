@@ -43,3 +43,6 @@ Tipo1/
 # Misc
 nul
 yarn-error.log
+
+# Logs
+logs/

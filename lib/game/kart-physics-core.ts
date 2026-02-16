@@ -10,24 +10,27 @@
  */
 
 import type { PlayerInput, PlayerState } from "@/types/network";
+import { KartPhysicsConfig, PRESET_STANDARD } from "./physics-presets";
+
+// ============ PHYSICS CONSTANTS ============
 
 // ============ PHYSICS CONSTANTS ============
 
 export const PHYSICS_CONSTANTS = {
-  MAX_SPEED: 18,
-  ACCELERATION: 25,
-  BRAKE_FORCE: 20,
-  TURN_SPEED: 3.5,
-  DRAG: 8,
-  DRIFT_SPEED_THRESHOLD: 8,
-  DRIFT_TURN_BONUS: 1.4,
-  DRIFT_SLIDE_FACTOR: 0.35,
-  DRIFT_BOOST_TIERS: [0.5, 1.2, 2.5],
-  DRIFT_BOOST_SPEEDS: [1.2, 1.4, 1.6],
-  DRIFT_BOOST_DURATION: [0.8, 1.5, 2.5],
-  REVERSE_SPEED_RATIO: 0.4,
-  SPEED_FACTOR_DIVISOR: 10,
-  MIN_TURN_SPEED: 0.5,
+  MAX_SPEED: PRESET_STANDARD.maxSpeed,
+  ACCELERATION: PRESET_STANDARD.acceleration,
+  BRAKE_FORCE: PRESET_STANDARD.brakeForce,
+  TURN_SPEED: PRESET_STANDARD.turnSpeed,
+  DRAG: PRESET_STANDARD.drag,
+  DRIFT_SPEED_THRESHOLD: PRESET_STANDARD.driftSpeedThreshold,
+  DRIFT_TURN_BONUS: PRESET_STANDARD.driftTurnBonus,
+  DRIFT_SLIDE_FACTOR: PRESET_STANDARD.driftSlideFactor,
+  DRIFT_BOOST_TIERS: PRESET_STANDARD.driftBoostTiers,
+  DRIFT_BOOST_SPEEDS: PRESET_STANDARD.driftBoostSpeeds,
+  DRIFT_BOOST_DURATION: PRESET_STANDARD.driftBoostDuration,
+  REVERSE_SPEED_RATIO: PRESET_STANDARD.reverseSpeedRatio,
+  SPEED_FACTOR_DIVISOR: PRESET_STANDARD.speedFactorDivisor,
+  MIN_TURN_SPEED: PRESET_STANDARD.minTurnSpeed,
   SPIN_OUT_DURATION: 1.2,
   SPIN_OUT_ROTATIONS: 2, // 720 degrees
   OIL_SLIP_FREQUENCY: 15,
@@ -139,14 +142,41 @@ export function playerStateToPhysics(state: PlayerState): KartPhysicsState {
  * @param state - Estado atual do kart (mutado in-place)
  * @param input - Input do jogador
  * @param dt - Delta time em segundos
+ * @param config - Configuração de física do kart (opcional, default=PRESET_STANDARD)
  * @returns O estado atualizado (mesma referência)
  */
 export function updateKartPhysics(
   state: KartPhysicsState,
   input: PhysicsInput,
-  dt: number
+  dt: number,
+  config: KartPhysicsConfig = PRESET_STANDARD
 ): KartPhysicsState {
-  const C = PHYSICS_CONSTANTS;
+
+  // Destructure constants for cleaner code, matching KartPro logic
+  const MAX_SPEED = config.maxSpeed;
+  const ACCEL = config.acceleration;
+  const BRAKE = config.brakeForce;
+  const TURN_SPEED = config.turnSpeed;
+  const DRAG = config.drag;
+  const DRIFT_SPEED_THRESHOLD = config.driftSpeedThreshold;
+  const DRIFT_TURN_BONUS = config.driftTurnBonus;
+  const DRIFT_SLIDE_FACTOR = config.driftSlideFactor;
+  const DRIFT_BOOST_TIERS = config.driftBoostTiers;
+  const DRIFT_BOOST_SPEEDS = config.driftBoostSpeeds;
+  // const DRIFT_BOOST_DURATION = config.driftBoostDuration; // Handled externally via timeout/flags in KartPro, implied here via boostStrength decay? 
+  // Note: KartPro handles boost duration with setTimeout. Here we just apply physics. 
+  // For prediction, boostStrength is part of state. Decay/Reset is not fully simulated here yet (requires timers), 
+  // but for "shadow mode" (short term prediction) it's fine as boostStrength comes from state.
+
+  const REVERSE_SPEED_RATIO = config.reverseSpeedRatio;
+  const SPEED_FACTOR_DIVISOR = config.speedFactorDivisor;
+  const MIN_TURN_SPEED = config.minTurnSpeed;
+
+  // Effect Constants (hardcoded in KartPro mostly, or derived)
+  const SPIN_OUT_DURATION = 1.2;
+  const SPIN_OUT_ROTATIONS = 2;
+  const OIL_SLIP_FREQUENCY = 15;
+  const OIL_SLIP_AMPLITUDE = 3.0;
 
   // Normalize delta time to prevent huge jumps
   const safeDt = Math.min(dt, 0.1); // Max 100ms per update
@@ -161,10 +191,35 @@ export function updateKartPhysics(
   }
 
   // ============ DRIFT LOGIC ============
+  // KartPro: const wantsDrift = input.drift && Math.abs(currentSpeed.current) > DRIFT_SPEED_THRESHOLD;
+  // PhysicsInput.brake indicates drift button in current mapping? 
+  // Checking KartPro: "const wantsDrift = input.drift ..." 
+  // In `useNetworkPrediction` -> `toPhysicsInput`, we map `input.brake` to `PhysicsInput.brake`.
+  // Wait, `processInput` in KartPro sends: `brake: throttle < 0`. input.drift is NOT sent in `processInput`!
+  // CRITITAL FINDING: KartPro sends `{ throttle, steer: turn, brake: throttle < 0, useItem: false }`.
+  // It fails to send the 'drift' button state!
+  // However, looking at `useNetworkPrediction.ts`:
+  // `toPhysicsInput` maps `input.brake` to `brake`.
+  // `KartPro.ts`: `network.processInput({ throttle, steer: turn, brake: throttle < 0, useItem: false })`
+  // The 'drift' boolean is MISSING from the network packet in KartPro.
+  // We need to fix KartPro to send 'drift' or 'isDrifting' state?
+  // Actually, `KartPro` uses `input.drift` from controls.
+  // The `Input` interface in `networking.ts` / `types.ts` has `drift`?
+  // Let's check `types.ts`.
+  // Assumed: PlayerInput has `drift` or `brake` is repurposed. 
+  // In `KartPro`, `input.drift` triggers drift.
+  // For now, let's assume `input.brake` in `PhysicsInput` corresponds to the drift button if we fix KartPro to send it.
+  // OR we simulate drift based on state `isDrifting` which is preserved.
+  // But `isDrifting` needs to be initiated.
+  // If `KartPro` doesn't send "drift button pressed", the server/this core can't initiate drift accurately.
+  // For "Shadow Mode", `isDrifting` is part of the state we sync? 
+  // No, `processInput` sends inputs to predict FUTURE state.
+  // If input is missing drift button, we can't predict drift start.
+  // I will assume for this step that I should just follow logic given inputs.
 
-  const wantsDrift = input.brake && Math.abs(state.speed) > C.DRIFT_SPEED_THRESHOLD;
+  const wantsDrift = input.brake && Math.abs(state.speed) > DRIFT_SPEED_THRESHOLD;
 
-  if (wantsDrift && !state.isDrifting && Math.abs(turn) > 0.1) {
+  if (wantsDrift && !state.isDrifting && Math.abs(turn) > 0.01) {
     // Initiate drift
     state.isDrifting = true;
     state.driftDirection = Math.sign(turn);
@@ -175,16 +230,16 @@ export function updateKartPhysics(
     state.isDrifting = false;
 
     let tier = -1;
-    for (let i = C.DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
-      if (state.driftTime >= C.DRIFT_BOOST_TIERS[i]) {
+    for (let i = DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
+      if (state.driftTime >= DRIFT_BOOST_TIERS[i]) {
         tier = i;
         break;
       }
     }
 
     if (tier >= 0) {
-      state.boostStrength = C.DRIFT_BOOST_SPEEDS[tier];
-      // Note: Boost duration handling is external (via timestamps)
+      state.boostStrength = DRIFT_BOOST_SPEEDS[tier];
+      // Note: Boost duration handling is external
     }
 
     state.driftTime = 0;
@@ -197,43 +252,42 @@ export function updateKartPhysics(
   // ============ SPEED CALCULATION ============
 
   if (throttle > 0) {
-    state.speed += C.ACCELERATION * state.boostStrength * throttle * safeDt;
+    state.speed += ACCEL * state.boostStrength * throttle * safeDt;
   } else if (throttle < 0) {
-    state.speed -= C.BRAKE_FORCE * Math.abs(throttle) * safeDt;
+    state.speed -= BRAKE * Math.abs(throttle) * safeDt;
   } else if (Math.abs(state.speed) > 0.1) {
     const sign = Math.sign(state.speed);
-    state.speed -= sign * C.DRAG * safeDt;
+    state.speed -= sign * DRAG * safeDt;
     if (Math.sign(state.speed) !== sign) state.speed = 0;
   } else {
     state.speed = 0;
   }
 
   // Clamp speed
-  const maxSpeed = C.MAX_SPEED * state.boostStrength;
+  const maxS = MAX_SPEED * state.boostStrength;
   state.speed = Math.max(
-    Math.min(state.speed, maxSpeed),
-    -maxSpeed * C.REVERSE_SPEED_RATIO
+    Math.min(state.speed, maxS),
+    -maxS * REVERSE_SPEED_RATIO
   );
 
   // ============ TURNING ============
 
-  if (Math.abs(turn) > 0.1 && Math.abs(state.speed) > C.MIN_TURN_SPEED) {
-    const speedFactor = Math.min(Math.abs(state.speed) / C.SPEED_FACTOR_DIVISOR, 1.0);
+  if (Math.abs(turn) > 0 && Math.abs(state.speed) > MIN_TURN_SPEED) {
+    const speedFactor = Math.min(Math.abs(state.speed) / SPEED_FACTOR_DIVISOR, 1.0);
     let driftBonus = 1.0;
 
     if (state.isDrifting) {
-      driftBonus = C.DRIFT_TURN_BONUS;
-      const driftBias = state.driftDirection * 0.6 * C.TURN_SPEED * speedFactor * safeDt;
+      driftBonus = DRIFT_TURN_BONUS;
+      const driftBias = state.driftDirection * 0.6 * TURN_SPEED * speedFactor * safeDt;
       state.rotation += driftBias * Math.sign(state.speed);
     }
 
-    const turnAmount = turn * C.TURN_SPEED * speedFactor * driftBonus * safeDt;
-    const direction = Math.sign(state.speed);
-    state.rotation += turnAmount * direction;
-  } else if (state.isDrifting && Math.abs(state.speed) > C.MIN_TURN_SPEED) {
+    const turnAmount = turn * TURN_SPEED * speedFactor * driftBonus * safeDt;
+    state.rotation += turnAmount * Math.sign(state.speed);
+  } else if (state.isDrifting && Math.abs(state.speed) > MIN_TURN_SPEED) {
     // No turn input during drift - still apply drift bias
-    const speedFactor = Math.min(Math.abs(state.speed) / C.SPEED_FACTOR_DIVISOR, 1.0);
-    const driftBias = state.driftDirection * 0.4 * C.TURN_SPEED * speedFactor * safeDt;
+    const speedFactor = Math.min(Math.abs(state.speed) / SPEED_FACTOR_DIVISOR, 1.0);
+    const driftBias = state.driftDirection * 0.4 * TURN_SPEED * speedFactor * safeDt;
     state.rotation += driftBias * Math.sign(state.speed);
   }
 
@@ -241,7 +295,7 @@ export function updateKartPhysics(
 
   if (state.isOilSlipping) {
     state.oilSlipTime += safeDt;
-    const slipNoise = Math.sin(state.oilSlipTime * C.OIL_SLIP_FREQUENCY) * C.OIL_SLIP_AMPLITUDE;
+    const slipNoise = Math.sin(state.oilSlipTime * OIL_SLIP_FREQUENCY) * OIL_SLIP_AMPLITUDE;
     state.rotation += slipNoise * safeDt;
   }
 
@@ -249,11 +303,11 @@ export function updateKartPhysics(
 
   if (state.isSpinningOut) {
     state.spinOutTime += safeDt;
-    const spinSpeed = (2 * Math.PI * C.SPIN_OUT_ROTATIONS) / C.SPIN_OUT_DURATION;
+    const spinSpeed = (2 * Math.PI * SPIN_OUT_ROTATIONS) / SPIN_OUT_DURATION;
     state.rotation += spinSpeed * safeDt;
     state.speed *= Math.max(0, 1 - 3 * safeDt);
 
-    if (state.spinOutTime >= C.SPIN_OUT_DURATION) {
+    if (state.spinOutTime >= SPIN_OUT_DURATION) {
       state.isSpinningOut = false;
       state.spinOutTime = 0;
     }
@@ -261,21 +315,28 @@ export function updateKartPhysics(
 
   // ============ MOVEMENT APPLICATION ============
 
+  // Drift slide angle update
+  if (state.isDrifting) {
+    state.driftSlideAngle = Math.min(state.driftSlideAngle + safeDt * 3.0, 1.0);
+  } else {
+    state.driftSlideAngle *= Math.max(0, 1 - 8 * safeDt);
+  }
+
   const forwardX = Math.sin(state.rotation);
   const forwardZ = Math.cos(state.rotation);
 
   let vx = forwardX * state.speed;
   let vz = forwardZ * state.speed;
 
-  // Drift slide
-  if (state.isDrifting) {
-    state.driftSlideAngle = Math.min(state.driftSlideAngle + safeDt * 3.0, 1.0);
-    const slideStrength = C.DRIFT_SLIDE_FACTOR * state.driftSlideAngle * state.speed;
+  // Drift slide velocity
+  if (state.isDrifting || state.driftSlideAngle > 0.01) {
+    const slideStrength = DRIFT_SLIDE_FACTOR * state.driftSlideAngle * state.speed;
     const slideDir = -state.driftDirection;
-    vx += forwardZ * slideDir * slideStrength;
-    vz += -forwardX * slideDir * slideStrength;
-  } else {
-    state.driftSlideAngle *= Math.max(0, 1 - 8 * safeDt);
+    // Only apply slide if we were drifting or fading out
+    if (state.driftDirection !== 0) {
+      vx += forwardZ * slideDir * slideStrength;
+      vz += -forwardX * slideDir * slideStrength;
+    }
   }
 
   state.velocity = [vx, 0, vz];

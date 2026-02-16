@@ -24,6 +24,9 @@ export interface PlayerInput {
   /** Freio/drift */
   brake: boolean;
 
+  /** Drift input (distinct from brake for clarity) */
+  drift: boolean;
+
   /** Usar item */
   useItem: boolean;
 
@@ -219,6 +222,7 @@ export function createEmptyInput(frame: number): PlayerInput {
     throttle: 0,
     steer: 0,
     brake: false,
+    drift: false,
     useItem: false,
     timestamp: performance.now(),
   };

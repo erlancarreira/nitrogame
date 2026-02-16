@@ -63,9 +63,6 @@ function smoothTowards(
   };
 }
 
-
-
-
 const MICRO_CORRECTION_THRESHOLD_SQ = 0.01; // 10cm squared (0.1 * 0.1)
 const SNAP_THRESHOLD_SQ = 1.0; // 1m squared
 
@@ -84,7 +81,6 @@ function physicsStateToLoggable(state: KartPhysicsState) {
     speed: state.speed
   };
 }
-
 
 export function useNetworkPrediction(
   kartId: string,
@@ -255,7 +251,12 @@ export function useNetworkPrediction(
 
       inputBuffer.current.lastConfirmedFrame = lastProcessedFrame;
 
-      
+      // Remove todos os inputs que o servidor já confirmou ter processado
+      if (inputBuffer.current.pending.length > 0) {
+        inputBuffer.current.pending = inputBuffer.current.pending.filter(
+          (p) => p.input.frame > lastProcessedFrame
+        );
+      }
 
       const myState = snapshot.players[kartId];
       if (!myState) return;
@@ -295,7 +296,7 @@ export function useNetworkPrediction(
           meta: { action: "smooth_no_pending", serverPos: physicsStateToLoggable(serverPhysicsState).position, renderPos: physicsStateToLoggable(renderState.current).position }
         });
         serverState.current = serverPhysicsState; // Update serverState reference
-        // IMMEDIATE BUFFER CLEANUP
+        // IMMEDIATE BUFFER CLEANUP (já filtrado acima, mas mantido por segurança)
         inputBuffer.current.pending = inputBuffer.current.pending.filter(
           (p) => p.input.frame > lastProcessedFrame
         );
@@ -313,14 +314,26 @@ export function useNetworkPrediction(
       // Replay remaining inputs on top of server state
       const replayedState = reapplyPendingInputs(serverPhysicsState);
 
-      // 2. Calculate Error: Compare REPLAYED (what we should be) vs RENDER (what we predicted)
-      const distSq = calculateDistSq(replayedState.position, renderState.current.position);
+      // 2. Calculate Error: use server vs render as erro principal e log demais distâncias
+      const distReplayVsRenderSq = calculateDistSq(
+        replayedState.position,
+        renderState.current.position
+      );
+      const distServerVsReplaySq = calculateDistSq(
+        serverPhysicsState.position,
+        replayedState.position
+      );
+      const distServerVsRenderSq = calculateDistSq(
+        serverPhysicsState.position,
+        renderState.current.position
+      );
+
+      const distSq = distServerVsRenderSq;
 
       // 3. Apply Correction based on Error Magnitude
       if (distSq < MICRO_CORRECTION_THRESHOLD_SQ) {
         // A. Micro-error: Ignore it. Trust local prediction to avoid micro-jitters.
         serverState.current = serverPhysicsState;
-        // renderState.current = replayedState; // DONT SNAP. Keep prediction smoothness.
 
         debugLogger.log({
           frame: snapshot.frame,
@@ -332,6 +345,9 @@ export function useNetworkPrediction(
             serverPos: physicsStateToLoggable(serverPhysicsState).position,
             replayPos: physicsStateToLoggable(replayedState).position,
             renderPos: physicsStateToLoggable(renderState.current).position,
+            distServerVsRender: Math.sqrt(distServerVsRenderSq),
+            distServerVsReplay: Math.sqrt(distServerVsReplaySq),
+            distReplayVsRender: Math.sqrt(distReplayVsRenderSq),
             pendingInputs: inputBuffer.current.pending.length,
             firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
             lastProcessedFrame
@@ -339,7 +355,7 @@ export function useNetworkPrediction(
         });
         // No state change needed for renderState
       } else if (distSq > SNAP_THRESHOLD_SQ) {
-        // B. Major error (Teleport/Lag spike): Hard snap.
+        // B. Major error (Teleport/Lag spike): Hard snap towards the corrected replayed state.
         console.warn(`[net-pred] Hard snap mismatch: ${Math.sqrt(distSq).toFixed(2)}m`);
 
         const oldRenderState = structuredClone(renderState.current); // Capture BEFORE snap
@@ -361,6 +377,9 @@ export function useNetworkPrediction(
             serverPos: physicsStateToLoggable(serverPhysicsState).position,
             replayPos: physicsStateToLoggable(replayedState).position,
             renderPos: physicsStateToLoggable(oldRenderState).position, // Log the state that caused the error
+            distServerVsRender: Math.sqrt(distServerVsRenderSq),
+            distServerVsReplay: Math.sqrt(distServerVsReplaySq),
+            distReplayVsRender: Math.sqrt(distReplayVsRenderSq),
             pendingInputs: inputBuffer.current.pending.length,
             firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
             lastProcessedFrame
@@ -382,6 +401,9 @@ export function useNetworkPrediction(
             replayPos: physicsStateToLoggable(replayedState).position,
             oldRenderPos: physicsStateToLoggable(oldRenderState).position,
             newRenderPos: physicsStateToLoggable(renderState.current).position,
+            distServerVsRender: Math.sqrt(distServerVsRenderSq),
+            distServerVsReplay: Math.sqrt(distServerVsReplaySq),
+            distReplayVsRender: Math.sqrt(distReplayVsRenderSq),
             pendingInputs: inputBuffer.current.pending.length,
             firstPendingFrame: inputBuffer.current.pending[0]?.input.frame,
             lastProcessedFrame

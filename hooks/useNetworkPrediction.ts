@@ -10,6 +10,7 @@ import {
   INPUT_SEND_RATE,
   FRAME_INTERVAL,
   MAX_PENDING_INPUTS,
+  createDefaultState,
 } from "@/types/network";
 import {
   KartPhysicsState,

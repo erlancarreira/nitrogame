@@ -81,6 +81,7 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
         networkManager.onMessage((msg) => {
           if (msg.type === "LOBBY_UPDATE") {
             serverSettingsRef.current = { mapId: msg.settings.mapId, laps: msg.settings.laps };
+            serverPlayersRef.current = msg.players; // Update reference state
             setPlayers(msg.players);
             const map = MAPS.find(m => m.id === msg.settings.mapId);
             if (map) setSelectedMap(map);
@@ -128,6 +129,7 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
         const unsub = networkManager.onMessage((msg) => {
           if (msg.type === "LOBBY_UPDATE") {
             serverSettingsRef.current = { mapId: msg.settings.mapId, laps: msg.settings.laps };
+            serverPlayersRef.current = msg.players; // Update reference state
             clearTimeout(timeout);
             setPlayers(msg.players);
             setLobbyCode(inputCode.toUpperCase());
@@ -171,6 +173,9 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
     }
   }, [inputCode, t, players, setPlayers, setSelectedMap, setLaps, setView, onStartGame]);
 
+  // Track last players state received from server to avoid echo loops
+  const serverPlayersRef = useRef<Player[]>([]);
+
   // --- Sync settings to server (host only) ---
   useEffect(() => {
     if (gameMode !== "online" || onlineRole !== "host") return;
@@ -182,20 +187,61 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
     networkManager.emitSettingsUpdate({ mapId: selectedMap.id, laps });
   }, [selectedMap, laps, gameMode, onlineRole]);
 
-  // --- Sync player details to server ---
+  // --- 1. Sync LOCAL NAME changes to server (Debounced) ---
   useEffect(() => {
-    if (gameMode === "online") {
-      const myPlayer = players.find(p => p.id === networkManager.myId);
+    if (gameMode !== "online" || !networkManager.myId) return;
+
+    const timer = setTimeout(() => {
+      const myId = networkManager.myId;
+      const myPlayer = players.find(p => p.id === myId);
+
+      // Only emit if we have a player object
       if (myPlayer) {
+        // Check if the name actually changed from what the server knows
+        // to avoid sending redundant updates
+        const serverVersion = serverPlayersRef.current.find(p => p.id === myId);
+        if (serverVersion && serverVersion.name === playerName) {
+          return;
+        }
+
         networkManager.emitPlayerUpdate({
-          name: myPlayer.name,
-          color: myPlayer.color,
-          modelUrl: myPlayer.modelUrl,
-          modelPackId: myPlayer.modelPackId,
+          ...myPlayer,
+          name: playerName, // Use the raw input name
+        });
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [playerName, gameMode]); // Only depend on playerName (and mode)
+
+  // --- 2. Sync OTHER attributes (color, model) to server ---
+  useEffect(() => {
+    if (gameMode !== "online" || !networkManager.myId) return;
+
+    const myId = networkManager.myId;
+    const myPlayer = players.find(p => p.id === myId);
+    if (!myPlayer) return;
+
+    const serverVersion = serverPlayersRef.current.find(p => p.id === myId);
+
+    // If we don't have a server version yet, or if attributes differ, emit update
+    // We explicitly exclude 'name' here because that's handled by the effect above
+    if (serverVersion) {
+      const colorChanged = myPlayer.color !== serverVersion.color;
+      const modelChanged = myPlayer.modelUrl !== serverVersion.modelUrl || myPlayer.modelPackId !== serverVersion.modelPackId;
+
+      if (colorChanged || modelChanged) {
+        networkManager.emitPlayerUpdate({
+          ...myPlayer,
+          // We keep the name from the player object (which should be synced via the other effect/local state)
+          // or we could enforce using 'playerName' state here too, but 'myPlayer.name' should be up to date
+          // locally anyway. BUT, to be safe, let's use the authoritative local name state
+          name: playerName
         });
       }
     }
-  }, [players, gameMode]);
+
+  }, [players, gameMode, playerName]);
 
   // --- Cleanup helper ---
   const cleanup = useCallback(() => {

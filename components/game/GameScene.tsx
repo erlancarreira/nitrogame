@@ -6,6 +6,7 @@ import { Physics } from "@react-three/rapier";
 
 import type { MapConfig } from "@/lib/game/maps";
 import type { Player, Controls } from "@/lib/game/types";
+import { SNAPSHOT_RATE } from "@/types/network";
 import { Track } from "./Track";
 import { StartGrid } from "./StartGrid";
 import { KartPro as Kart, type KartRef } from "./KartPro";
@@ -28,6 +29,8 @@ import { RedShell } from "./RedShell";
 import type { RacerState } from "@/hooks/use-race-state";
 import { interpolator } from "@/lib/game/interpolator";
 import { NetworkInterpolationLoop } from "./NetworkInterpolationLoop";
+import { TelemetryUI } from "./TelemetryUI";
+import { netClock } from "@/lib/netcode/netclock";
 
 export type GameSceneProps = {
   selectedMap: MapConfig;
@@ -128,13 +131,22 @@ export const GameScene = React.memo(function GameScene({
     ? players.find((p) => p.id === localPlayerId)
     : players.find((p) => !p.isBot);
 
-  const otherPlayers = localPlayerId
-    ? players.filter((p) => p.id !== localPlayerId)
-    : players.filter((p) => p.isBot || !p.isBot); // single-player shows bots only later
+  // Filter out the human player from the "others" list
+  // SAFEGUARD: Ensure we don't include the human player as an "other" player
+  const otherPlayers = players.filter((p) => p.id !== humanPlayer?.id);
 
-  const botPlayersHost = otherPlayers.filter((p) => p.isBot && networkManager.isHost);
-  const botPlayersRemote = otherPlayers.filter((p) => p.isBot && !networkManager.isHost);
+  // Determine Host Authority (Crucial for Local Mode)
+  // If we have a roomCode, we are online -> use networkManager.isHost.
+  // If NO roomCode, we are offline/local -> we are ALWAYS Host.
+  const isHost = networkManager.roomCode ? networkManager.isHost : true;
+
+  const botPlayersHost = otherPlayers.filter((p) => p.isBot && isHost);
+  const botPlayersRemote = otherPlayers.filter((p) => p.isBot && !isHost);
   const remoteHumans = otherPlayers.filter((p) => !p.isBot);
+
+  // Rate limiting for snapshots
+  const lastBroadcastTimeRef = React.useRef<Map<string, number>>(new Map());
+  const SNAPSHOT_INTERVAL_MS = 1000 / SNAPSHOT_RATE;
 
   const kartRef = React.useRef<KartRef>(null);
   const botRefs = React.useRef<Record<string, KartRef>>({});
@@ -177,16 +189,57 @@ export const GameScene = React.memo(function GameScene({
 
   const handleLocalPositionUpdate = useCallback(
     (id: string, pos: [number, number, number], rot: number, speed: number, progress: number) => {
-      // Atualiza HUD/minimapa/localmente, mas não envia mais POS via WebRTC.
+      // Local update
       handlePositionUpdate(id, pos, rot, speed, progress);
+
+      const now = performance.now();
+      const last = lastBroadcastTimeRef.current.get(id) || 0;
+
+      if (now - last >= SNAPSHOT_INTERVAL_MS) {
+        lastBroadcastTimeRef.current.set(id, now);
+
+        const seq = localSeqRef.current++;
+        if (localSeqRef.current > 65535) localSeqRef.current = 0; // Uint16 wrap
+
+        // Network broadcast (POS)
+        networkManager.broadcast({
+          type: "POS",
+          id,
+          p: pos,
+          r: rot,
+          s: speed,
+          l: progress,
+          t: netClock.now, // Server Time
+          seq: seq
+        });
+      }
     },
     [handlePositionUpdate]
   );
 
-  // Host-only: broadcast bot positions to remote players (agora só para HUD, sem POS)
+  // Host-only: broadcast bot positions to remote players
   const handleBotPositionUpdate = useCallback(
     (id: string, pos: [number, number, number], rot: number, speed: number, progress: number) => {
+      // Local update
       handlePositionUpdate(id, pos, rot, speed, progress);
+
+      const now = performance.now();
+      const last = lastBroadcastTimeRef.current.get(id) || 0;
+
+      if (now - last >= SNAPSHOT_INTERVAL_MS) {
+        lastBroadcastTimeRef.current.set(id, now);
+
+        // Network broadcast (POS)
+        networkManager.broadcast({
+          type: "POS",
+          id,
+          p: pos,
+          r: rot,
+          s: speed,
+          l: progress,
+          t: netClock.now, // Server Time
+        });
+      }
     },
     [handlePositionUpdate]
   );
@@ -222,6 +275,8 @@ export const GameScene = React.memo(function GameScene({
     handleShellCollide,
     handleNetworkItemHit,
     useHumanItem,
+    getWorldSnapshot,
+    restoreWorldSnapshot,
   } = useItemSystem({
     kartRef,
     botRefs,
@@ -264,17 +319,28 @@ export const GameScene = React.memo(function GameScene({
     }
     return data;
   }, [localPlayerId, players, selectedMap, startRotation]);
-  const remoteKartDataRef   = React.useRef(initialRemoteData);
-  const lastNetworkUpdate   = React.useRef(0);
+  const remoteKartDataRef = React.useRef(initialRemoteData);
+  const lastNetworkUpdate = React.useRef(0);
   const lastSnapshotTimeRef = React.useRef<Map<string, number>>(new Map());
+  const localSeqRef = React.useRef(0);
 
   // Listen for network updates (GAME_SNAPSHOT + fallback POS + ITEM_HIT + PLAYER_FINISHED)
   React.useEffect(() => {
     const unsub = networkManager.onMessage((msg) => {
+      const now = performance.now();
+
+      // Helper to check if we own this entity (Local Player or Host Bot)
+      const isLocalEntity = (id: string) => {
+        if (id === localPlayerId) return true;
+        // Optimization: Checking array every packet might be slow if many bots. 
+        // But for <12 players it's fine.
+        return botPlayersHost.some(b => b.id === id);
+      };
+
       if (msg.type === "GAME_SNAPSHOT") {
         const snapshot = msg.snapshot;
         Object.entries(snapshot.players).forEach(([id, state]) => {
-          if (id === localPlayerId) return;
+          if (isLocalEntity(id)) return;
 
           const last = lastSnapshotTimeRef.current.get(id);
           if (last !== undefined && snapshot.serverTime <= last) return;
@@ -292,11 +358,12 @@ export const GameScene = React.memo(function GameScene({
         return;
       }
 
-      if (msg.type === "POS" && msg.id !== localPlayerId) {
-        // Fallback para caminhos antigos, se ainda houver POS via WebRTC
+      if (msg.type === "POS") {
+        if (isLocalEntity(msg.id)) return;
+
+        // POS via WebRTC or Relay
         const last = lastSnapshotTimeRef.current.get(msg.id);
 
-        // ignora pacote atrasado ou duplicado
         if (last !== undefined && msg.t <= last) return;
 
         lastSnapshotTimeRef.current.set(msg.id, msg.t);
@@ -306,16 +373,42 @@ export const GameScene = React.memo(function GameScene({
           p: msg.p,
           r: msg.r,
           s: msg.s,
-          l: msg.l
+          l: msg.l,
+          seq: msg.seq
         });
         return;
-      } else if (msg.type === "PLAYER_FINISHED" && msg.id !== localPlayerId) {
-        onRemoteFinish?.(msg.id, msg.finishTime);
+      } else if (msg.type === "PLAYER_FINISHED") {
+        if (!isLocalEntity(msg.id)) {
+          onRemoteFinish?.(msg.id, msg.finishTime);
+        }
       }
       handleNetworkItemHit(msg);
+
+      // Entity Replication Sync
+      if (msg.type === "REQUEST_WORLD_STATE" && networkManager.isHost) {
+        // Host replies with current state
+        const snapshot = getWorldSnapshot();
+        networkManager.broadcast({
+          type: "WORLD_STATE_SYNC",
+          shells: snapshot.shells,
+          bananas: snapshot.bananas,
+          oils: snapshot.oils
+        });
+      } else if (msg.type === "WORLD_STATE_SYNC") {
+        // Client receives state
+        restoreWorldSnapshot(msg);
+      }
     });
+
+    // On Mount: If I am NOT host, request state
+    if (!networkManager.isHost && networkManager.roomCode) {
+      // Delay slightly to ensure listeners are ready? No, socket is ready.
+      // Send request
+      networkManager.sendToHost({ type: "REQUEST_WORLD_STATE" });
+    }
+
     return unsub;
-  }, [localPlayerId, handlePositionUpdate, handleNetworkItemHit, onRemoteFinish]);
+  }, [localPlayerId, handlePositionUpdate, handleNetworkItemHit, onRemoteFinish, getWorldSnapshot, restoreWorldSnapshot]);
 
   return (
     <>
@@ -375,7 +468,7 @@ export const GameScene = React.memo(function GameScene({
                 key={remote.id}
                 id={remote.id}
                 playerName={remote.name}
-                dataRef={remoteKartDataRef}
+                racerStatesRef={racerStatesRef}
                 initialPosition={selectedMap.startPositions?.[players.findIndex((p) => p.id === remote.id)] || [0, 2, 0]}
                 initialRotation={startRotation}
                 modelUrl={remote.modelUrl || DEFAULT_CAR_MODEL}
@@ -388,6 +481,7 @@ export const GameScene = React.memo(function GameScene({
             {botPlayersHost.map((bot, index) => (
               <BotKart
                 key={bot.id}
+                isHost={isHost}
                 ref={(r: import("./KartPro").KartRef | null) => {
                   if (r) {
                     botRefs.current[bot.id] = r;
@@ -404,6 +498,8 @@ export const GameScene = React.memo(function GameScene({
                 map={selectedMap}
                 difficulty={botDifficulty}
                 raceStarted={gameState === "racing"}
+                // Bots need an extra 180° (PI) rotation on Green Valley to face the correct way
+                // This seems to be due to model orientation or track spline direction differences
                 initialRotation={startRotation}
                 onPositionUpdate={handleBotPositionUpdate}
                 onEffectsUpdate={(effects) => handleBotEffectsUpdate(bot.id, effects)}
@@ -416,7 +512,7 @@ export const GameScene = React.memo(function GameScene({
                 key={bot.id}
                 id={bot.id}
                 playerName={bot.name}
-                dataRef={remoteKartDataRef}
+                racerStatesRef={racerStatesRef}
                 initialPosition={selectedMap.startPositions?.[players.findIndex((p) => p.id === bot.id)] || [0, 2, 0]}
                 initialRotation={startRotation}
                 modelUrl={bot.modelUrl || DEFAULT_CAR_MODEL}
@@ -495,10 +591,12 @@ export const GameScene = React.memo(function GameScene({
         {/* Debug: draw call counter */}
         <NetworkInterpolationLoop
           localPlayerId={localPlayerId}
+          ignoredIds={botPlayersHost.map(b => b.id)}
           handlePositionUpdate={handlePositionUpdate}
         />
         <DrawCallLogger />
       </Canvas>
+      <TelemetryUI />
     </>
   );
 });

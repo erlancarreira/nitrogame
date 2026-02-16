@@ -43,7 +43,7 @@ export interface KartPhysicsState {
   velocity: [number, number, number];
   lapProgress: number;
   lap: number;
-  
+
   // Internal physics state
   isDrifting: boolean;
   driftTime: number;
@@ -147,23 +147,23 @@ export function updateKartPhysics(
   dt: number
 ): KartPhysicsState {
   const C = PHYSICS_CONSTANTS;
-  
+
   // Normalize delta time to prevent huge jumps
   const safeDt = Math.min(dt, 0.1); // Max 100ms per update
-  
+
   let throttle = input.throttle;
   let turn = input.steer;
-  
+
   // Block input during spin out
   if (state.isSpinningOut) {
     throttle = 0;
     turn = 0;
   }
-  
+
   // ============ DRIFT LOGIC ============
-  
+
   const wantsDrift = input.brake && Math.abs(state.speed) > C.DRIFT_SPEED_THRESHOLD;
-  
+
   if (wantsDrift && !state.isDrifting && Math.abs(turn) > 0.1) {
     // Initiate drift
     state.isDrifting = true;
@@ -173,7 +173,7 @@ export function updateKartPhysics(
   } else if (!wantsDrift && state.isDrifting) {
     // Release drift - check for boost
     state.isDrifting = false;
-    
+
     let tier = -1;
     for (let i = C.DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
       if (state.driftTime >= C.DRIFT_BOOST_TIERS[i]) {
@@ -181,21 +181,21 @@ export function updateKartPhysics(
         break;
       }
     }
-    
+
     if (tier >= 0) {
       state.boostStrength = C.DRIFT_BOOST_SPEEDS[tier];
       // Note: Boost duration handling is external (via timestamps)
     }
-    
+
     state.driftTime = 0;
     state.driftDirection = 0;
   } else if (state.isDrifting) {
     // Accumulate drift time
     state.driftTime += safeDt;
   }
-  
+
   // ============ SPEED CALCULATION ============
-  
+
   if (throttle > 0) {
     state.speed += C.ACCELERATION * state.boostStrength * throttle * safeDt;
   } else if (throttle < 0) {
@@ -207,26 +207,26 @@ export function updateKartPhysics(
   } else {
     state.speed = 0;
   }
-  
+
   // Clamp speed
   const maxSpeed = C.MAX_SPEED * state.boostStrength;
   state.speed = Math.max(
     Math.min(state.speed, maxSpeed),
     -maxSpeed * C.REVERSE_SPEED_RATIO
   );
-  
+
   // ============ TURNING ============
-  
+
   if (Math.abs(turn) > 0.1 && Math.abs(state.speed) > C.MIN_TURN_SPEED) {
     const speedFactor = Math.min(Math.abs(state.speed) / C.SPEED_FACTOR_DIVISOR, 1.0);
     let driftBonus = 1.0;
-    
+
     if (state.isDrifting) {
       driftBonus = C.DRIFT_TURN_BONUS;
       const driftBias = state.driftDirection * 0.6 * C.TURN_SPEED * speedFactor * safeDt;
       state.rotation += driftBias * Math.sign(state.speed);
     }
-    
+
     const turnAmount = turn * C.TURN_SPEED * speedFactor * driftBonus * safeDt;
     const direction = Math.sign(state.speed);
     state.rotation += turnAmount * direction;
@@ -236,37 +236,37 @@ export function updateKartPhysics(
     const driftBias = state.driftDirection * 0.4 * C.TURN_SPEED * speedFactor * safeDt;
     state.rotation += driftBias * Math.sign(state.speed);
   }
-  
+
   // ============ OIL SLIP EFFECT ============
-  
+
   if (state.isOilSlipping) {
     state.oilSlipTime += safeDt;
     const slipNoise = Math.sin(state.oilSlipTime * C.OIL_SLIP_FREQUENCY) * C.OIL_SLIP_AMPLITUDE;
     state.rotation += slipNoise * safeDt;
   }
-  
+
   // ============ SPIN OUT EFFECT ============
-  
+
   if (state.isSpinningOut) {
     state.spinOutTime += safeDt;
     const spinSpeed = (2 * Math.PI * C.SPIN_OUT_ROTATIONS) / C.SPIN_OUT_DURATION;
     state.rotation += spinSpeed * safeDt;
     state.speed *= Math.max(0, 1 - 3 * safeDt);
-    
+
     if (state.spinOutTime >= C.SPIN_OUT_DURATION) {
       state.isSpinningOut = false;
       state.spinOutTime = 0;
     }
   }
-  
+
   // ============ MOVEMENT APPLICATION ============
-  
+
   const forwardX = Math.sin(state.rotation);
   const forwardZ = Math.cos(state.rotation);
-  
+
   let vx = forwardX * state.speed;
   let vz = forwardZ * state.speed;
-  
+
   // Drift slide
   if (state.isDrifting) {
     state.driftSlideAngle = Math.min(state.driftSlideAngle + safeDt * 3.0, 1.0);
@@ -277,14 +277,14 @@ export function updateKartPhysics(
   } else {
     state.driftSlideAngle *= Math.max(0, 1 - 8 * safeDt);
   }
-  
+
   state.velocity = [vx, 0, vz];
-  
+
   // Update position
   state.position[0] += vx * safeDt;
   state.position[2] += vz * safeDt;
   // Y stays at ground level (handled by ground collision elsewhere)
-  
+
   return state;
 }
 
@@ -337,7 +337,7 @@ export function spinOut(state: KartPhysicsState): void {
 export function getDriftTier(state: KartPhysicsState): number {
   const C = PHYSICS_CONSTANTS;
   if (!state.isDrifting) return 0;
-  
+
   for (let i = C.DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
     if (state.driftTime >= C.DRIFT_BOOST_TIERS[i]) {
       return i + 1;

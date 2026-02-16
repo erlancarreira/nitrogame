@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "start": "next start",
     "tunnel": "cloudflared tunnel --url http://127.0.0.1:3000",
+    "tunnel:config": "cloudflared tunnel --config tunnel-config.yml run",
     "prod": "next build && npx concurrently -n integrated,tunnel \"npx cross-env NODE_ENV=production npx tsx server/integrated.ts\" \"cloudflared tunnel --url http://127.0.0.1:3000\"",
     "prod:local": "next build && npx cross-env NODE_ENV=production npx tsx server/integrated.ts"
   },

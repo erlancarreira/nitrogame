@@ -48,7 +48,7 @@ interface SpatialEngineSoundProps {
         t: number;
     }>>;
     /** Racer states ref (for real-time speed data) */
-  racerStatesRef?: React.MutableRefObject<Map<string, RacerState>>;
+    racerStatesRef?: React.MutableRefObject<Map<string, RacerState>>;
     /** Bot player definitions (for maxSpeed/difficulty) */
     botPlayers: Array<{ id: string; isBot: boolean }>;
     /** Bot difficulty (affects maxSpeed for pitch calc) */
@@ -109,38 +109,22 @@ export function SpatialEngineSound({
         _playerPos.current.set(pPos[0], pPos[1], pPos[2]);
         _playerForward.current.set(Math.sin(pRot), 0, Math.cos(pRot));
 
-        // Collect all rival karts
+        // Collect all rival karts from centralized state
         const rivals: RivalKartInfo[] = [];
 
-        // 1. Bot karts
-        for (const bot of botPlayers) {
-            if (!bot.isBot) continue;
-            const ref = botRefs.current[bot.id];
-            if (!ref) continue;
-            rivals.push({
-                id: bot.id,
-                getPosition: () => ref.getPosition ? ref.getPosition() as [number, number, number] : null,
-                getSpeed: () => {
-                    // Try to get real speed from racer states
-                    const state = racerStatesRef?.current?.get(bot.id);
-                    if (state && typeof state.speed === "number") {
-                        return Math.abs(state.speed);
-                    }
-                    // Fallback: assume ~70% of max speed when racing
-                    return DIFFICULTY_MAX_SPEED[botDifficulty] * 0.7;
-                },
-                maxSpeed: DIFFICULTY_MAX_SPEED[botDifficulty],
-            });
-        }
+        if (racerStatesRef?.current) {
+            for (const racer of racerStatesRef.current.values()) {
+                if (racer.isPlayer) continue; // Skip local player (listener)
 
-        // 2. Remote karts (online multiplayer)
-        if (remoteKartDataRef?.current) {
-            for (const [id, data] of Object.entries(remoteKartDataRef.current)) {
+                // Determine if bot to set max speed
+                const isBot = botPlayers.find(b => b.id === racer.id)?.isBot;
+                const maxSpeed = isBot ? DIFFICULTY_MAX_SPEED[botDifficulty] : 45;
+
                 rivals.push({
-                    id,
-                    getPosition: () => data.pos,
-                    getSpeed: () => data.speed,
-                    maxSpeed: 45, // Default max speed for remote karts
+                    id: racer.id,
+                    getPosition: () => racer.kartPosition,
+                    getSpeed: () => Math.abs(racer.speed),
+                    maxSpeed,
                 });
             }
         }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useGLTF, Loader } from "@react-three/drei";
+import { useGLTF, useTexture } from "@react-three/drei";
 
 import { MAPS, type MapConfig } from "@/lib/game/maps";
 import { CAR_PACKS, DEFAULT_CAR_MODEL, getNextCarModelInPack, getNextPackId, getPackById } from "@/lib/game/cars";
@@ -15,7 +15,7 @@ import { MenuBackground } from "./menu/MenuBackground";
 import { ModeSelectView } from "./menu/ModeSelectView";
 import { LobbySetupView } from "./menu/LobbySetupView";
 import { LobbyView } from "./menu/LobbyView";
-import { useOnlineLobby } from "./menu/useOnlineLobby";
+import { useOnlineLobby } from "@/hooks/use-online-lobby";
 
 interface MainMenuProps {
   onStartGame: (players: Player[], map: MapConfig, laps: number, localPlayerId?: string, serverRaceStartTime?: number) => void;
@@ -107,8 +107,23 @@ export function MainMenu({ onStartGame, isLoading = false }: MainMenuProps) {
     setView, onStartGame,
   });
 
+  // ---- Preload Map Assets ----
+  useEffect(() => {
+    if (selectedMap.modelUrl) {
+      useGLTF.preload(selectedMap.modelUrl);
+    }
+    if (selectedMap.textureUrl) {
+      useTexture.preload(selectedMap.textureUrl);
+    }
+  }, [selectedMap]);
+
   // ---- Sync player name → players array (debounced) ----
   useEffect(() => {
+    // In online mode, we trust the server to update the player list via LOBBY_UPDATE.
+    // We only do this local sync for Local Mode or if we are the host setting up initial state?
+    // Actually, even as host, it's better to let the server echo back.
+    if (online.gameMode === "online") return;
+
     const timer = setTimeout(() => {
       setPlayers(prev => {
         const myNetId = networkManager.myId;
@@ -130,7 +145,7 @@ export function MainMenu({ onStartGame, isLoading = false }: MainMenuProps) {
   const handleLaps = useCallback((newLaps: number) => {
     setLaps(newLaps);
   }, [setLaps]);
-  
+
 
   const getMyId = () => networkManager.myId || "player-1";
 
@@ -380,13 +395,7 @@ export function MainMenu({ onStartGame, isLoading = false }: MainMenuProps) {
         )}
       </div>
 
-      {isLoading && (
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-100 flex flex-col items-center justify-center animate-in fade-in duration-300">
-          <div className="text-4xl font-black italic text-white animate-pulse">
-            {t.loading.toUpperCase()}
-          </div>
-        </div>
-      )}
+
 
       {/* Settings Modal */}
       {settingsOpen && (
@@ -490,13 +499,6 @@ export function MainMenu({ onStartGame, isLoading = false }: MainMenuProps) {
         </div>
       )}
 
-      <Loader
-        containerStyles={{ background: "#0ea5e9" }}
-        innerStyles={{ width: "40vw", height: "10px", background: "rgba(255,255,255,0.2)", borderRadius: "5px" }}
-        barStyles={{ height: "100%", background: "#fbbf24", borderRadius: "5px" }}
-        dataInterpolation={(p: number) => `Loading Assets... ${p.toFixed(0)}%`}
-        initialState={(active: boolean) => active}
-      />
     </div>
   );
 }

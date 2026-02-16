@@ -8,7 +8,7 @@ import { CarModel } from "./CarModel";
 import type { KartRef } from "./KartPro";
 import { KartDriftSmoke, getRearWheelPositions } from "./KartEffects";
 import { PlayerNameTag } from "./PlayerNameTag";
-import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, MAX_DELTA, POSITION_UPDATE_INTERVAL, SPAWN_Y_OFFSET } from "@/lib/game/engine-constants";
+import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, MAX_DELTA, POSITION_UPDATE_INTERVAL, SPAWN_Y_OFFSET, PHYSICS_TIMESTEP } from "@/lib/game/engine-constants";
 import { KART_PRESETS, PRESET_STANDARD, type KartPhysicsConfig, type KartPresetId } from "@/lib/game/physics-presets";
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ const BOT_DRIFT_ANGLE_THRESHOLD = 0.3; // ~17° de ângulo de curva para conside
 interface BotKartProps {
   id: string;
   playerName?: string;
+  isHost?: boolean; // Added prop
   position: [number, number, number];
   initialRotation?: number;
   modelUrl?: string;
@@ -94,6 +95,7 @@ function clampLinvel(v: { x: number; y: number; z: number }, limit: number) {
 
 export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
   id,
+  isHost,
   playerName,
   position,
   initialRotation = 0,
@@ -205,6 +207,8 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     return rayRef.current;
   };
 
+  const accumulator = useRef(0);
+
   useFrame((_state, delta) => {
     const body = rigidBodyRef.current;
     if (!body) return;
@@ -226,108 +230,124 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
       return;
     }
 
-    const step = Math.min(delta, MAX_DELTA);
-    const pos = body.translation();
+    // Fixed Timestep Accumulator
+    // Clamp delta to 0.1s to prevent spiral of death during massive lag spikes
+    accumulator.current += Math.min(delta, 0.1);
 
-    if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) {
-      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      return;
-    }
+    // Safety break loop count
+    let steps = 0;
+    while (accumulator.current >= PHYSICS_TIMESTEP && steps < 10) {
+      steps++;
+      accumulator.current -= PHYSICS_TIMESTEP;
+      const step = PHYSICS_TIMESTEP;
 
-    _currentPos.current.set(pos.x, pos.y, pos.z);
-    const waypoints = waypointsRef.current;
-    if (waypoints.length === 0) return;
+      const pos = _currentPos.current; // Re-use vector, but we need to update it from somewhere?
+      // Ah, `pos` comes from body.translation(). But inside the loop, we are predicting future state?
+      // NO. Physics Loop updates `currentSpeed` and `currentRotation`.
+      // The Position integration happens via Rapier (External).
+      // Wait. if Rapier integrates position, we can't loop position-dependent logic perfectly without syncing position.
+      // However, `currentWaypointIndex` depends on position.
+      // If we assumed position updates only once per frame, `distToTarget` assumes old position.
+      // This is acceptable for AI navigation (it doesn't need sub-frame precision).
+      // We will read position ONCE per frame outside the loop.
 
-    // Waypoint switching (for navigation only, not for progress tracking)
-    const distToTarget = _currentPos.current.distanceTo(waypoints[currentWaypointIndex.current]);
-    if (distToTarget < settings.waypointRadius) {
-      currentWaypointIndex.current = (currentWaypointIndex.current + 1) % waypoints.length;
-    }
+      // Logic Update:
+      const waypoints = waypointsRef.current;
+      if (waypoints.length > 0) {
+        // Waypoint switching
+        const distToTarget = pos.distanceTo(waypoints[currentWaypointIndex.current]);
+        if (distToTarget < settings.waypointRadius) {
+          currentWaypointIndex.current = (currentWaypointIndex.current + 1) % waypoints.length;
+        }
 
-    // Direction to next waypoint
-    const nextWp = waypoints[currentWaypointIndex.current];
-    _direction.current.subVectors(nextWp, _currentPos.current);
-    _direction.current.y = 0;
-    _direction.current.normalize();
+        // Direction to next waypoint
+        const nextWp = waypoints[currentWaypointIndex.current];
+        _direction.current.subVectors(nextWp, pos);
+        _direction.current.y = 0;
+        _direction.current.normalize();
 
-    const targetAngle = Math.atan2(_direction.current.x, _direction.current.z);
+        const targetAngle = Math.atan2(_direction.current.x, _direction.current.z);
 
-    let angleDiff = targetAngle - currentRotation.current;
-    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        let angleDiff = targetAngle - currentRotation.current;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-    const turnAmount = Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), settings.turnSpeed * step);
+        const turnAmount = Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), settings.turnSpeed * step);
 
-    // Compute normalized steering for visual wheel rotation (-1 to 1)
-    const maxTurnPerFrame = settings.turnSpeed * step;
-    steeringValRef.current = maxTurnPerFrame > 0 ? -(turnAmount / maxTurnPerFrame) : 0;
+        // Compute normalized steering for visual wheel rotation
+        const maxTurnPerFrame = settings.turnSpeed * step;
+        steeringValRef.current = maxTurnPerFrame > 0 ? -(turnAmount / maxTurnPerFrame) : 0;
 
-    if (spinTimer.current > 0) {
-      currentRotation.current += SPIN_SPEED * step;
-      spinTimer.current -= step;
-      currentSpeed.current = 0;
-      steeringValRef.current = 0;
-    } else {
-      currentRotation.current += turnAmount;
-      if (currentSpeed.current < settings.maxSpeed) {
-        currentSpeed.current += settings.acceleration * step;
+        if (spinTimer.current > 0) {
+          currentRotation.current += SPIN_SPEED * step;
+          spinTimer.current -= step;
+          currentSpeed.current = 0;
+          steeringValRef.current = 0;
+        } else {
+          currentRotation.current += turnAmount;
+          if (currentSpeed.current < settings.maxSpeed) {
+            currentSpeed.current += settings.acceleration * step;
+          }
+          if (Math.abs(currentSpeed.current) > 0) {
+            const dragSign = Math.sign(currentSpeed.current);
+            currentSpeed.current = Math.max(0, Math.abs(currentSpeed.current) - settings.drag * step) * dragSign;
+          }
+        }
+
+        // Drift logic update
+        isDrifting.current =
+          Math.abs(angleDiff) > BOT_DRIFT_ANGLE_THRESHOLD &&
+          currentSpeed.current > settings.driftSpeedThreshold &&
+          spinTimer.current <= 0;
       }
-      // Match KartPro drag so bots decelerate the same way
-      if (Math.abs(currentSpeed.current) > 0) {
-        const dragSign = Math.sign(currentSpeed.current);
-        currentSpeed.current = Math.max(0, Math.abs(currentSpeed.current) - settings.drag * step) * dragSign;
-      }
     }
 
-    // Ground snapping via raycast (throttled: every 3 frames to save ~66% of raycast cost)
+    // --- Render Frame Logic (Visuals & Raycasts) ---
+    // Read current physical position from Rapier for Rays/Visuals
+    const t = body.translation();
+    if (!Number.isFinite(t.x)) { body.setLinvel({ x: 0, y: 0, z: 0 }, true); return; }
+    _currentPos.current.set(t.x, t.y, t.z);
+
+    // Ground snapping via raycast (throttled)
     rayFrameCount.current++;
     const shouldCast = rayFrameCount.current % 3 === 0;
     const nowMs = performance.now();
-    // Invalidate cached ground if stale (>200ms)
-    if (nowMs - lastGroundSample.current > 200) {
-      cachedGroundY.current = null;
-    }
+    if (nowMs - lastGroundSample.current > 200) cachedGroundY.current = null;
 
     if (shouldCast) {
       const ray = getRay();
-      ray.origin = { x: pos.x, y: pos.y + GROUND_RAY_OFFSET, z: pos.z };
+      ray.origin = { x: t.x, y: t.y + GROUND_RAY_OFFSET, z: t.z };
       const hit = world.castRay(ray, GROUND_RAY_RANGE, true, undefined, undefined, undefined, body);
-      cachedGroundY.current = hit
-        ? pos.y + GROUND_RAY_OFFSET - hit.timeOfImpact
-        : null;
+      cachedGroundY.current = hit ? t.y + GROUND_RAY_OFFSET - hit.timeOfImpact : null;
       lastGroundSample.current = nowMs;
     }
 
     let verticalVel = body.linvel().y;
+    // We use `step = delta` roughly for vertical integration/damping or use PHYSICS_TIMESTEP?
+    // Vertical velocity is set directly.
+    // Let's use `delta` for the damping purely visual/frame based.
+    const dampStep = Math.min(delta, 0.1);
 
     if (cachedGroundY.current !== null) {
       const targetY = cachedGroundY.current + HOVER_HEIGHT;
-      const diff = targetY - pos.y;
+      const diff = targetY - t.y;
 
       if (diff > SNAP_THRESHOLD) {
-        // Too far below ground — snap directly to surface
-        body.setTranslation({ x: pos.x, y: targetY, z: pos.z }, true);
+        body.setTranslation({ x: t.x, y: targetY, z: t.z }, true);
         verticalVel = 0;
       } else if (Math.abs(diff) > HEIGHT_DEADBAND) {
-        // Proportional correction scaled by delta time (prevents frame-rate-dependent launch)
-        verticalVel = diff * SPRING_STIFFNESS * step;
+        verticalVel = diff * SPRING_STIFFNESS * dampStep; // Using frame delta for spring
       } else {
-        // Close enough — kill vertical velocity (stabilize like KartPro)
         verticalVel = 0;
       }
-
-      // Additional stabilization: dampen micro-bouncing (matches KartPro approach)
-      if (Math.abs(verticalVel) < 2.0) {
-        verticalVel *= 0.8;
-      }
+      if (Math.abs(verticalVel) < 2.0) verticalVel *= 0.8;
     } else {
-      verticalVel -= GRAVITY * step;
+      verticalVel -= GRAVITY * dampStep; // Gravity per frame time
     }
 
-    // Clamp vertical velocity to prevent launch or tunneling
     verticalVel = Math.max(Math.min(verticalVel, MAX_VERTICAL_SPEED), -MAX_VERTICAL_SPEED);
 
-    // Apply physics (reuse pre-allocated objects — zero GC pressure)
+    // Apply Final State to RigidBody
     _quat.current.setFromAxisAngle(_yAxis.current, currentRotation.current);
     body.setRotation(_quat.current, true);
 
@@ -337,29 +357,20 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     const safeVel = clampLinvel({ x: velocity.x, y: verticalVel, z: velocity.z }, settings.maxSpeed * VELOCITY_CLAMP_FACTOR);
     body.setLinvel(safeVel, true);
 
-    // Drift detection: ângulo de curva grande + velocidade alta
-    isDrifting.current =
-      Math.abs(angleDiff) > BOT_DRIFT_ANGLE_THRESHOLD &&
-      currentSpeed.current > settings.driftSpeedThreshold &&
-      spinTimer.current <= 0;
-
     slipRatio.current = isDrifting.current
       ? Math.min(currentSpeed.current / settings.maxSpeed, 1)
       : 0;
 
     onEffectsUpdate?.({ isDrifting: isDrifting.current, isBoosting: false });
 
-    // Report position at fixed interval (deterministic, not random)
+    // Report position based on Clock (robust against frame rate)
     const elapsed = _state.clock.getElapsedTime();
     if (onPositionUpdate && elapsed - lastUpdateTime.current >= POSITION_UPDATE_INTERVAL) {
       lastUpdateTime.current = elapsed;
-
-      // Use spline projection for consistent, calibrated lap progress
       if (trackSplineRef.current) {
-        lapProgress.current = trackSplineRef.current.project(pos.x, pos.z, lapProgress.current);
+        lapProgress.current = trackSplineRef.current.project(t.x, t.z, lapProgress.current);
       }
-
-      onPositionUpdate(id, [pos.x, pos.y, pos.z], currentRotation.current, currentSpeed.current, lapProgress.current);
+      onPositionUpdate(id, [t.x, t.y, t.z], currentRotation.current, currentSpeed.current, lapProgress.current);
     }
   });
 

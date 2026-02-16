@@ -14,6 +14,8 @@ const BANANA_SCALE = 0.002; // Model is ~500 units tall (cm scale), 0.003 → ~1
 export interface BananaPoolRef {
     spawn: (position: [number, number, number], rotation: number, ownerId?: string) => void;
     despawn: (id: string) => void;
+    getSnapshot: () => any[];
+    restoreSnapshot: (items: any[]) => void;
 }
 
 interface BananaPoolProps {
@@ -158,6 +160,32 @@ export const BananaPool = forwardRef<BananaPoolRef, BananaPoolProps>(({ onCollid
                 forceUpdate(n => n + 1);
             }
         },
+        // State Replication
+        getSnapshot: () => {
+            return poolRef.current.filter(p => p.active).map(p => ({
+                position: p.position,
+                rotationY: p.rotation[1],
+                ownerId: p.ownerId
+            }));
+        },
+        restoreSnapshot: (items: any[]) => {
+            // Clear current
+            poolRef.current.forEach(p => p.active = false);
+            // Spawn new
+            items.forEach(item => {
+                // Use spawn logic to populate
+                const pool = poolRef.current;
+                const index = pool.findIndex(p => !p.active);
+                if (index === -1) return;
+                const slot = pool[index];
+                slot.active = true;
+                slot.position = item.position;
+                slot.rotation = [0, item.rotationY, 0];
+                slot.ownerId = item.ownerId;
+                slot.spawnTime = performance.now(); // Reset time, acceptable for simple sync
+            });
+            forceUpdate(n => n + 1);
+        }
     }));
 
     // Stable callback refs per slot (avoid creating new functions each render)

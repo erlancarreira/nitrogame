@@ -131,7 +131,7 @@ class SoundManager {
   // ── Intro Music ────────────────────────────────────────────────────
 
   playIntroMusic(): void {
-    const introTracks: SoundName[] = ["intro_music", "intro_music_2", "intro_music_3"];
+    const introTracks: SoundName[] = ["intro_music_2", "intro_music_3"];
 
     // Resume context if suspended (browser policy attempt)
     if (Howler.ctx && Howler.ctx.state === 'suspended') {

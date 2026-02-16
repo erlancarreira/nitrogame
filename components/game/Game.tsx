@@ -11,6 +11,7 @@ import { GameScene } from "./GameScene";
 import { GameHUD } from "./GameHUD";
 import { MainMenu } from "./MainMenu";
 import { MAPS, type MapConfig } from "@/lib/game/maps";
+import { generateTrackPoints } from "@/lib/game/track-path";
 import type { Player, Controls } from "@/lib/game/types";
 import { useKeyboardControls } from "@/hooks/use-keyboard-controls";
 import { useTouchControls, useIsTouchDevice } from "@/hooks/use-touch-controls";
@@ -30,15 +31,50 @@ type GameState = "waiting" | "countdown" | "racing" | "paused" | "finished";
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function getStartRotation(map: MapConfig): number {
-  const points = map.pathPoints;
+  // 1. Prefer explicit configuration from map data (Professional approach)
+  if (map.startRotation !== undefined) {
+    return map.startRotation;
+  }
+
+  // 2. Use explicit path points if available
+  if (map.pathPoints && map.pathPoints.length > 1) {
+    const [x1, z1] = map.pathPoints[0];
+    const [x2, z2] = map.pathPoints[1];
+    return Math.atan2(x2 - x1, z2 - z1);
+  }
+
+  // Otherwise generate procedural points to find the start tangent
+  const points = generateTrackPoints(map, 10);
   if (points && points.length > 1) {
+    // For oval tracks (Green Valley), points are generated CCW starting from "back".
+    // But the start line is on a straight section. We should check the direction *at the start position*.
+    // However, a simple robust fix for the main straight (where start always is)
+    // is to look at the track geometry. For Green Valley, straight supports Z-axis driving.
+    // If the map is Green Valley, we force Math.PI (facing backwards initially? or forward?)
+    // Let's assume standard counter-clockwise racing.
+    if (map.id === "green-valley") {
+      return Math.PI; // Face "North" or "South" depending on camera. Standard might be 0 or PI.
+      // Actually, if Z is -250 and we race towards +Z or -Z... 
+      // The oval generator: x = sin(angle)*R, z = cos(angle)*(L/2). 
+      // t=0 -> angle=PI -> x=0, z = -L/2.
+      // t increases -> angle increases -> z increases (cos goes from -1 up).
+      // So track moves from -Z to +Z on the "right" side (sin negative? angle PI to 2PI is 180 to 360 -> sin is negative... wait)
+      // angle = PI + t*2PI.
+      // t=0 (start) => angle=PI. sin(PI)=0, cos(PI)=-1. Pos=(0, -250).
+      // t small positive => angle > PI. sin(>PI) is negative (left/right?). cos(>PI) increases.
+      // So motion is increasing Z.
+      // To face +Z, rotation should be 0. To face -Z, rotation Math.PI.
+      // If we want to race "forward" along increasing Z?
+      return 0; // Face increasing Z.
+    }
+
     const [x1, z1] = points[0];
     const [x2, z2] = points[1];
     return Math.atan2(x2 - x1, z2 - z1);
   }
-  return -Math.PI / 2;
-}
 
+  return 0;
+}
 // ── Main Game Component ─────────────────────────────────────────────
 
 export function Game() {

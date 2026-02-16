@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from "react";
 import { networkManager } from "@/lib/game/networking";
+import { netClock } from "@/lib/netcode/netclock";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -59,13 +60,13 @@ export function useCountdown({
 
       if (serverRaceStartTime) {
         // ── Server-Synchronized Countdown ──
-        const clockOffset = networkManager.getClockOffset();
+        // ── Server-Synchronized Countdown ──
         console.log(
-          `[countdown] Server-synced. raceStartTime=${serverRaceStartTime}, clockOffset=${clockOffset.toFixed(1)}ms`
+          `[countdown] Server-synced. raceStartTime=${serverRaceStartTime}`
         );
 
         const tick = () => {
-          const serverNow = Date.now() + clockOffset;
+          const serverNow = netClock.now;
           const msUntilStart = serverRaceStartTime - serverNow;
 
           if (msUntilStart > 2000) {

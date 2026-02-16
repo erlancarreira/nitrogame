@@ -64,6 +64,7 @@ export interface PhysicsInput {
   throttle: number; // -1 to 1
   steer: number;    // -1 (left) to 1 (right)
   brake: boolean;
+  drift: boolean;
   useItem: boolean;
 }
 
@@ -191,33 +192,8 @@ export function updateKartPhysics(
   }
 
   // ============ DRIFT LOGIC ============
-  // KartPro: const wantsDrift = input.drift && Math.abs(currentSpeed.current) > DRIFT_SPEED_THRESHOLD;
-  // PhysicsInput.brake indicates drift button in current mapping? 
-  // Checking KartPro: "const wantsDrift = input.drift ..." 
-  // In `useNetworkPrediction` -> `toPhysicsInput`, we map `input.brake` to `PhysicsInput.brake`.
-  // Wait, `processInput` in KartPro sends: `brake: throttle < 0`. input.drift is NOT sent in `processInput`!
-  // CRITITAL FINDING: KartPro sends `{ throttle, steer: turn, brake: throttle < 0, useItem: false }`.
-  // It fails to send the 'drift' button state!
-  // However, looking at `useNetworkPrediction.ts`:
-  // `toPhysicsInput` maps `input.brake` to `brake`.
-  // `KartPro.ts`: `network.processInput({ throttle, steer: turn, brake: throttle < 0, useItem: false })`
-  // The 'drift' boolean is MISSING from the network packet in KartPro.
-  // We need to fix KartPro to send 'drift' or 'isDrifting' state?
-  // Actually, `KartPro` uses `input.drift` from controls.
-  // The `Input` interface in `networking.ts` / `types.ts` has `drift`?
-  // Let's check `types.ts`.
-  // Assumed: PlayerInput has `drift` or `brake` is repurposed. 
-  // In `KartPro`, `input.drift` triggers drift.
-  // For now, let's assume `input.brake` in `PhysicsInput` corresponds to the drift button if we fix KartPro to send it.
-  // OR we simulate drift based on state `isDrifting` which is preserved.
-  // But `isDrifting` needs to be initiated.
-  // If `KartPro` doesn't send "drift button pressed", the server/this core can't initiate drift accurately.
-  // For "Shadow Mode", `isDrifting` is part of the state we sync? 
-  // No, `processInput` sends inputs to predict FUTURE state.
-  // If input is missing drift button, we can't predict drift start.
-  // I will assume for this step that I should just follow logic given inputs.
-
-  const wantsDrift = input.brake && Math.abs(state.speed) > DRIFT_SPEED_THRESHOLD;
+  // Using explicit drift input (Option B)
+  const wantsDrift = input.drift && Math.abs(state.speed) > DRIFT_SPEED_THRESHOLD;
 
   if (wantsDrift && !state.isDrifting && Math.abs(turn) > 0.01) {
     // Initiate drift
@@ -422,6 +398,7 @@ export function normalizeInput(
     throttle: Math.max(-1, Math.min(1, input.throttle ?? 0)),
     steer: Math.max(-1, Math.min(1, input.steer ?? 0)),
     brake: input.brake ?? false,
+    drift: input.drift ?? false,
     useItem: input.useItem ?? false,
   };
 }

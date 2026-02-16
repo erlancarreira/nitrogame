@@ -126,9 +126,8 @@ export function useNetworkPrediction(
     return normalizeInput({
       throttle: input.throttle,
       steer: input.steer,
-      // CRITICAL: Map 'drift' button to 'brake' field in physics core for now, 
-      // because kart-physics-core uses 'brake' property to trigger drift logic.
-      brake: input.drift,
+      brake: input.brake,
+      drift: input.drift,
       useItem: input.useItem,
     });
   };

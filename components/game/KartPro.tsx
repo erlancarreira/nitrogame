@@ -312,24 +312,20 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         }
 
         // 2. Physics Steps Loop (Driven by Network Prediction)
-        let numSteps = 0;
-        while (accumulator.current >= PHYSICS_TIMESTEP && numSteps < 10) {
-            accumulator.current -= PHYSICS_TIMESTEP;
-            numSteps++;
+        // 2. Network Input (Send Input Once Per Frame)
+        // No loop needed; prediction engine handles tick-rate internally.
+        if (isLocalPlayer) {
+            // Safety check for spin-out (clamp input)
+            const safeThrottle = isSpinningOut.current ? 0 : throttle;
+            const safeTurn = isSpinningOut.current ? 0 : turn;
 
-            // Block input during spin out (handled in core, but good to clamp here too)
-            if (isSpinningOut.current) { throttle = 0; turn = 0; }
-
-            // NETWORK INPUT (Ticked sync with physics)
-            if (isLocalPlayer) {
-                network.processInput({
-                    throttle,
-                    steer: turn,
-                    brake: throttle < 0,
-                    drift: !!inputState.drift,
-                    useItem: false,
-                });
-            }
+            network.processInput({
+                throttle: safeThrottle,
+                steer: safeTurn,
+                brake: false, // We use 'drift' for drifting now. 'brake' is unused or for actual braking if implemented.
+                drift: !!inputState.drift,
+                useItem: false,
+            });
         }
 
         // --- 3. Render / Visual Integration ---
@@ -355,12 +351,19 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 spinOutTime.current = state.spinOutTime;
 
                 // Apply transform strictly from prediction
+                // Apply transform strictly from prediction (XZ) + Rapier (Y)
                 // No blending needed because this IS the simulation now
-                body.setTranslation({ x: state.position[0], y: state.position[1], z: state.position[2] }, true);
+                const currentT = body.translation();
+                const currentV = body.linvel();
+
+                // Core controls X/Z (authoritative). Rapier controls Y (gravity/walls).
+                body.setTranslation({ x: state.position[0], y: currentT.y, z: state.position[2] }, true);
 
                 _quat.current.setFromAxisAngle(_axis.current, state.rotation);
                 body.setRotation(_quat.current, true);
-                body.setLinvel({ x: state.velocity[0], y: state.velocity[1], z: state.velocity[2] }, true);
+
+                // Keep vertical velocity from physics engine (gravity/jump), override horizontal
+                body.setLinvel({ x: state.velocity[0], y: currentV.y, z: state.velocity[2] }, true);
                 body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
                 // Update local variables for camera/broadcast usage

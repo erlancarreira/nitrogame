@@ -11,27 +11,41 @@ export type Snapshot = {
 
 class SnapshotBuffer {
     private snapshots: Snapshot[] = [];
-    private static MAX_EXTRAPOLATION_TIME = 150; // ms
+    // Aumentado para 200ms para permitir mais suavidade na interpolação
+    private static MAX_EXTRAPOLATION_TIME = 200; // ms
+    // Aumentado o buffer de interpolação para 100ms
+    private static INTERPOLATION_DELAY_MS = 100; // ms
 
     add(snapshot: Snapshot) {
-        // Drop if older than the newest (assuming mostly ordered, but safe against duplicates)
-        if (this.snapshots.length > 0) {
-            if (this.snapshots.length > 0) {
-                const newest = this.snapshots[this.snapshots.length - 1];
-                if (snapshot.t <= newest.t) {
-                    return; // DESCARTA qualquer pacote fora de ordem
-                }
-            }
+        // Se o buffer estiver vazio, adiciona diretamente
+        if (this.snapshots.length === 0) {
+            this.snapshots.push(snapshot);
+            return;
         }
 
-        this.snapshots.push(snapshot);
-        this.snapshots.sort((a, b) => a.t - b.t);
-
-        // Keep only last 1 second
         const newest = this.snapshots[this.snapshots.length - 1];
-        const threshold = newest.t - 1000;
 
-        // Optimized pruning
+        // Rejeita apenas se for EXATAMENTE o mesmo timestamp ou mais antigo
+        // Isso permite pacotes com delay mas ainda úteis
+        if (snapshot.t <= newest.t) {
+            // Se for muito próximo (menos de 5ms), descarta como duplicado
+            if (newest.t - snapshot.t < 5) {
+                return;
+            }
+            // Se for um pouco mais antigo mas ainda dentro da janela útil,
+            // insere na posição correta em vez de descartar
+            const insertIndex = this.snapshots.findIndex(s => s.t > snapshot.t);
+            if (insertIndex !== -1) {
+                this.snapshots.splice(insertIndex, 0, snapshot);
+            } else {
+                this.snapshots.push(snapshot);
+            }
+        } else {
+            this.snapshots.push(snapshot);
+        }
+
+        // Keep only last 2 seconds (aumentado para ter mais buffer)
+        const threshold = snapshot.t - 2000;
         if (this.snapshots[0].t < threshold) {
             const keepIndex = this.snapshots.findIndex(s => s.t >= threshold);
             if (keepIndex > 0) {
@@ -72,7 +86,7 @@ class SnapshotBuffer {
                     if (range <= 0.001) return this.mapToState(A);
 
                     const t = (renderTime - A.t) / range;
-                    return this.interpolate(A, B, t);
+                    return this.interpolateSmooth(A, B, t);
                 } else {
                     // If no future snapshot exists, always extrapolate 0ms
                     return this.extrapolate(A, 0);
@@ -100,10 +114,28 @@ class SnapshotBuffer {
                 lerp(A.p[0], B.p[0], t),
                 A.p[1], // força Y fixo
                 lerp(A.p[2], B.p[2], t),
-            ],
-            rotation: lerpAngle(A.r, B.r, t),
+            ],n            rotation: lerpAngle(A.r, B.r, t),
             speed: lerp(A.s, B.s, t),
             lapProgress: lerp(A.l, B.l, t),
+        };
+    }
+
+    /**
+     * Interpolação suave com easing para reduzir micro-jitters
+     */
+    private interpolateSmooth(A: Snapshot, B: Snapshot, t: number): InterpolatedState {
+        // Aplica easing suave (ease-in-out) para transições mais naturais
+        const smoothT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        
+        return {
+            position: [
+                lerp(A.p[0], B.p[0], smoothT),
+                A.p[1], // mantém Y fixo para evitar flutuação
+                lerp(A.p[2], B.p[2], smoothT),
+            ],
+            rotation: lerpAngleSmooth(A.r, B.r, smoothT),
+            speed: lerp(A.s, B.s, smoothT),
+            lapProgress: lerp(A.l, B.l, smoothT),
         };
     }
 
@@ -195,5 +227,17 @@ function lerpAngle(a: number, b: number, t: number) {
     return a + diff * t;
 }
 
-export const interpolator = new SnapshotInterpolator();
+/**
+ * Interpolação de ângulo com suavização adicional
+ */
+function lerpAngleSmooth(a: number, b: number, t: number) {
+    let diff = b - a;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    
+    // Aplica uma curva de suavização suave
+    const smoothT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    return a + diff * smoothT;
+}
 
+export const interpolator = new SnapshotInterpolator();

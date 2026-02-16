@@ -27,6 +27,7 @@ import { DriftSound } from "./DriftSound";
 import { SpatialEngineSound } from "./SpatialEngineSound";
 import { RedShell } from "./RedShell";
 import type { RacerState } from "@/hooks/use-race-state";
+import { interpolator } from "@/lib/game/interpolator";
 
 import { netClock } from "@/lib/netcode/netclock";
 

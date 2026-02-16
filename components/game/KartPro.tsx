@@ -145,7 +145,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const DRIFT_SPEED_THRESHOLD = preset.driftSpeedThreshold;
     const DRIFT_TURN_BONUS = preset.driftTurnBonus;
     const DRIFT_SLIDE_FACTOR = preset.driftSlideFactor;
-    const DRIFT_BOOST_TIERS = preset.driftBoostTiers;
+    const DRIFT_BOOST_Tiers = preset.driftBoostTiers;
     const DRIFT_BOOST_SPEEDS = preset.driftBoostSpeeds;
     const DRIFT_BOOST_DURATION = preset.driftBoostDuration;
     const REVERSE_SPEED_RATIO = preset.reverseSpeedRatio;
@@ -287,6 +287,10 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         // 1. Accumulate Time
         accumulator.current += Math.min(delta, 0.1); // Clamp to 100ms prevents death spiral
 
+        // Prepare input values used both by local physics and netcode
+        let throttle = 0;
+        let turn = 0;
+
         // 2. Physics Steps Loop
         let numSteps = 0;
         while (accumulator.current >= PHYSICS_TIMESTEP && numSteps < 10) {
@@ -295,8 +299,8 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             const dt = PHYSICS_TIMESTEP;
 
             // --- INPUT LOGIC ---
-            let throttle = 0;
-            let turn = 0;
+            throttle = 0;
+            turn = 0;
 
             if (input.throttleY !== undefined && input.throttleY !== 0) {
                 throttle = input.throttleY;
@@ -322,8 +326,8 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             } else if (!wantsDrift && isDrifting.current) {
                 isDrifting.current = false;
                 let tier = -1;
-                for (let i = DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
-                    if (driftTime.current >= DRIFT_BOOST_TIERS[i]) { tier = i; break; }
+                for (let i = DRIFT_BOOST_Tiers.length - 1; i >= 0; i--) {
+                    if (driftTime.current >= DRIFT_BOOST_Tiers[i]) { tier = i; break; }
                 }
                 if (tier >= 0) {
                     boostStrength.current = DRIFT_BOOST_SPEEDS[tier];
@@ -336,10 +340,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 driftTime.current += dt;
             }
             wasDrifting.current = isDrifting.current;
-
-            if (isLocalPlayer) {
-                network.processInput({ throttle, steer: turn, brake: throttle < 0, useItem: false });
-            }
 
             if (isSpinningOut.current) { throttle = 0; turn = 0; }
 
@@ -410,6 +410,16 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
 
             // Visual Steering reference
             steeringValRef.current = turn;
+        }
+
+        // Envia input para o prediction/core apenas uma vez por frame (desacoplado do substep)
+        if (isLocalPlayer) {
+            network.processInput({
+                throttle,
+                steer: turn,
+                brake: throttle < 0,
+                useItem: false,
+            });
         }
 
         // --- 3. Render / Visual Integration ---
@@ -484,8 +494,8 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         // Effects Update
         let currentTier = 0;
         if (isDrifting.current) {
-            for (let i = DRIFT_BOOST_TIERS.length - 1; i >= 0; i--) {
-                if (driftTime.current >= DRIFT_BOOST_TIERS[i]) { currentTier = i + 1; break; }
+            for (let i = DRIFT_BOOST_Tiers.length - 1; i >= 0; i--) {
+                if (driftTime.current >= DRIFT_BOOST_Tiers[i]) { currentTier = i + 1; break; }
             }
         }
         onEffectsUpdate?.({
@@ -506,47 +516,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     }, []);
 
     return (
-        // <RigidBody
-        //     ref={rigidBodyRef}
-        //     name={id}
-        //     position={[position[0], position[1] + SPAWN_Y_OFFSET, position[2]]}
-        //     rotation={[0, initialRotation, 0]}
-        //     type="dynamic"
-        //     colliders={false}
-        //     mass={BODY_MASS}
-        //     lockRotations
-        //     linearDamping={0}
-        //     angularDamping={0}
-        //     friction={0}
-        //     restitution={0}
-        // >
-        //     <CuboidCollider
-        //         args={COLLIDER_HALF_EXTENTS}
-        //         position={COLLIDER_OFFSET}
-        //         friction={0}
-        //         restitution={0}
-        //     />
-
-        //     <group ref={groupRef}>
-        //         <CarModel
-        //             url={modelUrl || ""}
-        //             scale={modelScale}
-        //             steeringRef={steeringValRef}
-        //         />
-        //         {/* Fumaça nos pneus traseiros durante drift */}
-        //         <KartDriftSmoke
-        //             slipRatioRef={slipRatioRef}
-        //             rearWheelPositions={getRearWheelPositions(modelUrl)}
-        //         />
-        //         {/* Nome flutuante acima do kart */}
-        //         {playerName && (
-        //             <PlayerNameTag name={playerName} color={playerColor} />
-        //         )}
-        //     </group>
-        // </RigidBody>
-
-
-
         <RigidBody
             ref={rigidBodyRef}
             name={id}

@@ -114,7 +114,8 @@ class SnapshotBuffer {
                 lerp(A.p[0], B.p[0], t),
                 A.p[1], // força Y fixo
                 lerp(A.p[2], B.p[2], t),
-            ],n            rotation: lerpAngle(A.r, B.r, t),
+            ],
+            rotation: lerpAngle(A.r, B.r, t),
             speed: lerp(A.s, B.s, t),
             lapProgress: lerp(A.l, B.l, t),
         };

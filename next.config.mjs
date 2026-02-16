@@ -21,7 +21,7 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      allowedOrigins: ['localhost:3000', '*.trycloudflare.com', 'steel-logging-decor-adelaide.trycloudflare.com'],
+      allowedOrigins: ['localhost:3000', '*.trycloudflare.com', '*.erlancarreira.com.br'],
     },
   },
 }

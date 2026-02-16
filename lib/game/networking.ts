@@ -1,7 +1,7 @@
 import { io, Socket } from "socket.io-client";
 import { Player } from "./types";
 import type { GameSnapshot, PlayerInput } from "../../types/network";
-import { Telemetry } from "./telemetry";
+
 import { netClock } from "../netcode/netclock";
 
 const IS_DEV = process.env.NODE_ENV === "development";

@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Telemetry } from '@/lib/game/telemetry';
 import { debugLogger } from '@/lib/debug/logger';
 

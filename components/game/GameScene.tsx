@@ -29,7 +29,7 @@ import { RedShell } from "./RedShell";
 import type { RacerState } from "@/hooks/use-race-state";
 import { interpolator } from "@/lib/game/interpolator";
 import { NetworkInterpolationLoop } from "./NetworkInterpolationLoop";
-import { TelemetryUI } from "./TelemetryUI";
+
 import { netClock } from "@/lib/netcode/netclock";
 
 export type GameSceneProps = {
@@ -596,7 +596,7 @@ export const GameScene = React.memo(function GameScene({
         />
         <DrawCallLogger />
       </Canvas>
-      <TelemetryUI />
+      
     </>
   );
 });

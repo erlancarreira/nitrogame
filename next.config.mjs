@@ -4,6 +4,9 @@ const nextConfig = {
     // ignoreBuildErrors was removed — TypeScript errors MUST be fixed, not hidden.
     // This is a critical safety net. See: https://nextjs.org/docs/api-reference/next.config.js/ignoring-typescript-errors
   },
+  allowedDevOrigins: [
+    "nitrorush.erlancarreira.com.br",
+  ],
   // Disable caching ONLY in development to ensure fresh code on every reload.
   // In production, Next.js default caching applies for optimal performance.
   headers: async () => {
@@ -18,6 +21,14 @@ const nextConfig = {
       ];
     }
     return [];
+  },
+  async rewrites() {
+    return [
+      {
+        source: '/socket.io/:path*',
+        destination: 'http://localhost:3001/socket.io/:path*',
+      },
+    ];
   },
   experimental: {
     serverActions: {

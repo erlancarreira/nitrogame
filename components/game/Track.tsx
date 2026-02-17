@@ -21,6 +21,7 @@ function getArchGeo() {
   return { pillarGeo: _archPillarGeo, barGeo: _archBarGeo, checkerGeo: _checkerGeo };
 }
 import type { MapConfig } from "@/lib/game/maps";
+import { SplineTileTrack } from "./track/SplineTileTrack";
 import { ForestDecor } from "./ForestDecor";
 import { RacingKitDecor } from "./RacingKitDecor";
 import { generateTrackPath, cleanPoints, getDecorScale } from "@/lib/game/track-utils";
@@ -117,6 +118,11 @@ export function Track({
 }: TrackProps) {
   if (map.modelUrl) {
     return <ModelTrack url={map.modelUrl} scale={map.modelScale} />;
+  }
+
+  // NEW: Spline Path System (Rainbow Road style)
+  if (map.trackSystem?.type === 'spline-tiles') {
+    return <SplineTileTrack map={map} showWaypoints={showWaypoints} />;
   }
 
   const {

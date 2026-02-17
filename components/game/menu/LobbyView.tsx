@@ -217,7 +217,7 @@ export function LobbyView({
                 </h3>
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 md:gap-2.5 flex-1 overflow-y-auto pr-1 custom-scrollbar">
                   {AVAILABLE_MAPS.map((map) => {
-                    const isAvailable = map.id === "green-valley" || map.id === "turbo-speedway";
+                    const isAvailable = map.id === "green-valley" || map.id === "turbo-speedway" || map.id === "generated-technical"; // Only these maps are available for selection, others are locked for development 
                     return (
                       <button
                         key={map.id}

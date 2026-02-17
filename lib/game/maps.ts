@@ -1,3 +1,6 @@
+import { PlacedTile, generateFromTemplate } from "./track";
+import { CIRCUIT_TECHNICAL } from "./track/templates";
+
 export interface MapConfig {
   id: string;
   name: string;
@@ -23,6 +26,19 @@ export interface MapConfig {
   modelUrl?: string;
   modelScale?: number;
   itemBoxPositions?: [number, number, number][];
+
+  // Novo sistema (opcional, para não quebrar)
+  trackSystem?: {
+    type: 'legacy' | 'spline-tiles';
+    // Para spline-tiles:
+    seed?: string;
+    tiles?: PlacedTile[]; // Tiles pré-gerados (opcional)
+    difficulty?: 'easy' | 'medium' | 'hard' | 'expert';
+    features?: {
+      terrain: boolean;
+      floating: boolean; // Se true, sem terreno embaixo (tipo Rainbow Road)
+    };
+  };
 }
 
 export const MAPS: MapConfig[] = [
@@ -290,6 +306,62 @@ export const MAPS: MapConfig[] = [
     ],
     startRotation: 0, // Facing +X
   },
+  {
+    id: "rainbow-road-pro",
+    name: "Rainbow Road Pro",
+    description: "A procedurally generated masterpiece using the new spline system",
+    difficulty: "expert",
+    trackColor: "#222222", // Multicolor handling will be in the renderer
+    grassColor: "#000000", // Space
+    barrierColors: ["#ff00ff", "#00ffff"],
+    skyPreset: "night",
+    trackType: "complex",
+    trackWidth: 16,
+    trackLength: 1000, // Procedural, so this is ensuring camera far clip is ok
+    curveRadius: 100,
+    decorationType: "city",
+    thumbnail: "purple",
+    startPositions: [
+      [0, 2, 0], [5, 2, 0], [-5, 2, 0], [10, 2, 0],
+      [-10, 2, 0], [15, 2, 0], [-15, 2, 0], [20, 2, 0]
+    ],
+    // Activates the new system
+    trackSystem: {
+      type: 'spline-tiles',
+      seed: 'rainbow-road-v1',
+      features: {
+        terrain: false, // Space!
+        floating: true
+      }
+    }
+  },
+  {
+    id: "generated-technical",
+    name: "Generated Technical",
+    description: "A technical circuit generated from grammar template",
+    difficulty: "hard",
+    trackColor: "#444444",
+    grassColor: "#2d5a27",
+    barrierColors: ["#ffff00", "#333333"],
+    skyPreset: "day",
+    trackType: "complex",
+    trackWidth: 40,
+    trackLength: 1200,
+    curveRadius: 80,
+    decorationType: "forest",
+    thumbnail: "green",
+    startPositions: [
+      [0, 2, 0], [5, 2, 0], [-5, 2, 0], [10, 2, 0] // Placeholder
+    ],
+    trackSystem: {
+      type: 'spline-tiles',
+      tiles: generateFromTemplate(CIRCUIT_TECHNICAL, 'seed-123'),
+      features: {
+        terrain: true,
+        floating: false
+      }
+    }
+  }
 ];
 
 export function getMapById(id: string): MapConfig | undefined {

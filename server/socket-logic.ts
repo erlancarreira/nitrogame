@@ -24,13 +24,18 @@ interface RoomPlayer {
     lastPos?: { x: number; y: number; z: number };
 }
 
+type RoomGameState = "lobby" | "countdown" | "racing" | "finished";
+
+/** Cooldown entre start-game consecutivos para evitar double-click (ms) */
+const REMATCH_COOLDOWN_MS = 5_000;
+
 interface Room {
     code: string;
     hostSocketId: string;
     players: RoomPlayer[];
     settings: { mapId: string; laps: number };
-    gameStarted: boolean;
-    gameConfig?: { mapId: string; laps: number; raceStartTime: number };
+    gameState: RoomGameState;
+    gameConfig?: { mapId: string; laps: number; raceStartTime: number; initiatedAt: number };
 }
 
 // Simulation types for authoritative server
@@ -249,59 +254,68 @@ export function setupSocketIO(io: Server) {
     // This runs once for the entire server (handling all room simulations)
     setInterval(() => {
         const now = Date.now();
-        for (const sim of roomSims.values()) {
-            sim.frame += 1;
 
-            // Update physics
-            for (const [socketId, simPlayer] of sim.players) {
-                const { physics } = simPlayer;
-                const inputs = simPlayer.inputs;
-
-                if (inputs.length > 0) {
-                    inputs.sort((a, b) => a.frame - b.frame);
-                    for (const input of inputs) {
-                        if (input.frame <= simPlayer.lastProcessedFrame) continue;
-                        const physInput = normalizeInput({
-                            throttle: input.throttle,
-                            steer: input.steer,
-                            brake: input.brake,
-                            drift: input.drift,
-                            useItem: input.useItem,
-                        });
-                        updateKartPhysics(physics, physInput, SIM_DT_MS / 1000);
-                        simPlayer.lastProcessedFrame = input.frame;
-                        simPlayer.lastInput = physInput; // Save last valid input
-                    }
-                    simPlayer.inputs = [];
-                } else {
-                    // No new input? Use last known input (Input Persistence)
-                    // This prevents "braking" simulation if a packet arrives 1ms late or if client is 30Hz
-                    const stickyInput = simPlayer.lastInput || normalizeInput({ throttle: 0, steer: 0, brake: false, drift: false, useItem: false });
-                    updateKartPhysics(physics, stickyInput, SIM_DT_MS / 1000);
-                }
-
-                // Server physics logging removed — appendFileSync blocks the event loop
-                // (~24 synchronous writes/sec with 4 players). Use client-side debug logger instead.
+        // Transição automática de estado: countdown → racing
+        for (const room of rooms.values()) {
+            if (room.gameState === "countdown" && room.gameConfig && now >= room.gameConfig.raceStartTime) {
+                room.gameState = "racing";
             }
+        }
 
-            // Send snapshots
-            if (now - sim.lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) {
-                const playersState: Record<string, PlayerState> = {};
+        for (const sim of roomSims.values()) {
+            try {
+                sim.frame += 1;
+
+                // Update physics
                 for (const [socketId, simPlayer] of sim.players) {
-                    playersState[socketId] = stateToPlayerState(socketId, simPlayer.physics, sim.frame, now);
+                    const { physics } = simPlayer;
+                    const inputs = simPlayer.inputs;
+
+                    if (inputs.length > 0) {
+                        inputs.sort((a, b) => a.frame - b.frame);
+                        for (const input of inputs) {
+                            if (input.frame <= simPlayer.lastProcessedFrame) continue;
+                            const physInput = normalizeInput({
+                                throttle: input.throttle,
+                                steer: input.steer,
+                                brake: input.brake,
+                                drift: input.drift,
+                                useItem: input.useItem,
+                            });
+                            updateKartPhysics(physics, physInput, SIM_DT_MS / 1000);
+                            simPlayer.lastProcessedFrame = input.frame;
+                            simPlayer.lastInput = physInput; // Save last valid input
+                        }
+                        simPlayer.inputs = [];
+                    } else {
+                        // No new input? Use last known input (Input Persistence)
+                        // This prevents "braking" simulation if a packet arrives 1ms late or if client is 30Hz
+                        const stickyInput = simPlayer.lastInput || normalizeInput({ throttle: 0, steer: 0, brake: false, drift: false, useItem: false });
+                        updateKartPhysics(physics, stickyInput, SIM_DT_MS / 1000);
+                    }
                 }
-                const snapshot: GameSnapshot = {
-                    frame: sim.frame,
-                    serverTime: now,
-                    players: playersState,
-                };
-                for (const [socketId, simPlayer] of sim.players) {
-                    io.to(socketId).emit("game-snapshot", {
-                        snapshot,
-                        lastProcessedFrame: simPlayer.lastProcessedFrame,
-                    });
+
+                // Send snapshots
+                if (now - sim.lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) {
+                    const playersState: Record<string, PlayerState> = {};
+                    for (const [socketId, simPlayer] of sim.players) {
+                        playersState[socketId] = stateToPlayerState(socketId, simPlayer.physics, sim.frame, now);
+                    }
+                    const snapshot: GameSnapshot = {
+                        frame: sim.frame,
+                        serverTime: now,
+                        players: playersState,
+                    };
+                    for (const [socketId, simPlayer] of sim.players) {
+                        io.to(socketId).emit("game-snapshot", {
+                            snapshot,
+                            lastProcessedFrame: simPlayer.lastProcessedFrame,
+                        });
+                    }
+                    sim.lastSnapshotAt = now;
                 }
-                sim.lastSnapshotAt = now;
+            } catch (err) {
+                console.error(`[sim] Error in simulation loop for room ${sim.roomCode}:`, err);
             }
         }
     }, SIM_DT_MS);
@@ -341,7 +355,7 @@ export function setupSocketIO(io: Server) {
                 hostSocketId: socket.id,
                 players: [player],
                 settings: { mapId: "green-valley", laps: 3 },
-                gameStarted: false,
+                gameState: "lobby",
             };
             rooms.set(code, room);
             socketIdMap.set(socket.id, code); // Cache lookup
@@ -365,7 +379,7 @@ export function setupSocketIO(io: Server) {
                 ack({ ok: false, error: "Room not found" });
                 return;
             }
-            if (room.gameStarted) {
+            if (room.gameState !== "lobby") {
                 ack({ ok: false, error: "Game already started" });
                 return;
             }
@@ -436,7 +450,7 @@ export function setupSocketIO(io: Server) {
             ack({ ok: true, playerId: socket.id });
 
             // Se o jogo já começou, re-enviar game-start para o jogador que reconectou
-            if (room.gameStarted && room.gameConfig) {
+            if (room.gameState !== "lobby" && room.gameConfig) {
                 socket.emit("game-start", {
                     mapId: room.gameConfig.mapId,
                     laps: room.gameConfig.laps,
@@ -494,24 +508,41 @@ export function setupSocketIO(io: Server) {
             if (!guard(socket, "start-game", RATE.lobby)) return;
             const room = getRoomBySocket(socket.id);
             if (!room || room.hostSocketId !== socket.id) return;
-            if (room.gameStarted) return; // Guard contra double-start
-            room.gameStarted = true;
+            // State machine: só permite start em "lobby" ou "finished" (rematch)
+            // Em "countdown"/"racing", aplica cooldown para evitar double-click
+            const now = Date.now();
+            const isRematch = room.gameState !== "lobby";
+            if (room.gameState === "countdown" || room.gameState === "racing") {
+                const timeSinceInit = room.gameConfig
+                    ? now - room.gameConfig.initiatedAt
+                    : Infinity;
+                if (timeSinceInit < REMATCH_COOLDOWN_MS) {
+                    console.log(`[game] Room ${room.code}: start-game blocked (cooldown, ${Math.round(timeSinceInit)}ms elapsed)`);
+                    return;
+                }
+            }
+
+            // Transição de estado: lobby/finished → countdown
+            room.gameState = "countdown";
 
             // Mesclar: jogadores humanos do SERVIDOR (source of truth) + bots do host
             const serverHumans = room.players.filter(p => !p.isBot);
             const hostBots = (data.players || []).filter((p: RoomPlayer) => p.isBot);
             room.players = [...serverHumans, ...hostBots];
 
+            const raceStartTime = now + 4000;
+
             // Salvar config para re-envio em rejoin
             room.gameConfig = {
                 mapId: data.mapId,
                 laps: data.laps,
-                raceStartTime: Date.now() + 4000,
+                raceStartTime,
+                initiatedAt: now,
             };
 
             ensureRoomSimulation(room);
 
-            console.log(`[game] Room ${room.code} started (${serverHumans.length} humans, ${hostBots.length} bots), raceStart=${room.gameConfig.raceStartTime}`);
+            console.log(`[game] Room ${room.code} ${isRematch ? "rematch" : "started"} (${serverHumans.length} humans, ${hostBots.length} bots), raceStart=${room.gameConfig.raceStartTime}`);
             io.to(room.code).emit("game-start", {
                 mapId: room.gameConfig.mapId,
                 laps: room.gameConfig.laps,
@@ -615,7 +646,7 @@ export function setupSocketIO(io: Server) {
             }
 
             // If mid-game, give grace period
-            if (room.gameStarted) {
+            if (room.gameState !== "lobby") {
                 console.log(`[room] ${socket.id} disconnected mid-game, grace period 15s`);
                 io.to(room.code).emit("player-temporarily-disconnected", { playerId: socket.id });
 

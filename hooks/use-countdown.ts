@@ -55,11 +55,10 @@ export function useCountdown({
 
   const start = useCallback(
     (serverRaceStartTime?: number) => {
-      // Clean previous timers
+      // Limpar timers anteriores (idempotência: seguro chamar múltiplas vezes)
       cleanup();
 
       if (serverRaceStartTime) {
-        // ── Server-Synchronized Countdown ──
         // ── Server-Synchronized Countdown ──
         console.log(
           `[countdown] Server-synced. raceStartTime=${serverRaceStartTime}`

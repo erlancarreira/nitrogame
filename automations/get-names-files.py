@@ -4,7 +4,7 @@ import json
 
 def pedir_pasta():
     while True:
-        pasta = input("Digite o CAMINHO COMPLETO da pasta com arquivos .glb:\n> ").strip().strip('"')
+        pasta = input("Digite o CAMINHO COMPLETO da pasta:\n> ").strip().strip('"')
 
         if not pasta:
             print("⚠ Você precisa digitar um caminho.\n")
@@ -21,10 +21,10 @@ def pedir_pasta():
         return pasta
 
 
-def listar_glb(pasta):
+def listar_arquivos(pasta):
     arquivos = [
         nome for nome in os.listdir(pasta)
-        if nome.lower().endswith(".glb")
+        if os.path.isfile(os.path.join(pasta, nome))
     ]
     arquivos.sort()
     return arquivos
@@ -33,14 +33,14 @@ def listar_glb(pasta):
 def main():
     pasta = pedir_pasta()
 
-    arquivos = listar_glb(pasta)
+    arquivos = listar_arquivos(pasta)
 
-    with open("modelos.json", "w", encoding="utf-8") as f:
+    with open("automations/arquivos.json", "w", encoding="utf-8") as f:
         json.dump(arquivos, f, indent=2, ensure_ascii=False)
 
     print("\n✔ Processo concluído")
     print(f"Arquivos encontrados: {len(arquivos)}")
-    print("JSON salvo como: modelos.json")
+    print("JSON salvo como: arquivos.json")
 
 
 if __name__ == "__main__":

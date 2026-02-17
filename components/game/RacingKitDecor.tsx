@@ -62,6 +62,8 @@ const MODELS = {
   grass: `${BASE}grass.glb`,
   fenceStraight: `${BASE}fenceStraight.glb`,
   rail: `${BASE}rail.glb`,
+  treeLarge: `${BASE}treeLarge.glb`,
+  treeSmall: `${BASE}treeSmall.glb`,
 } as const;
 
 type ModelKey = keyof typeof MODELS;
@@ -80,122 +82,99 @@ interface TileDef {
   rot: number;      // rotation in degrees (0, 90, 180, 270)
   sx?: number;      // grid size X (default 1)
   sz?: number;      // grid size Z (default 1)
+  y?: number;       // height offset (default 0.0001)
 }
 
 // Layout inspired by the Kenney Racing Kit Sample.png
 // Circuit goes: start straight → large right → back straight → large left →
 // top straight → large right → bridge straight → large right → return to start
+// Redesigned layout to match sample.png (Figure-8 with bridge)
+// Bridge crosses at Y=6, Ground at Y=0.
 const CIRCUIT_TILES: TileDef[] = [
-  // ═══ START/FINISH STRAIGHT (bottom, going right +X) ═══
-  { model: "roadStartPositions", gx: 0, gz: 0, rot: 90, sx: 1, sz: 2 },
-  { model: "roadStraightLong", gx: 1, gz: 0, rot: 90, sx: 1, sz: 2 },
-  { model: "roadStraightLongMid", gx: 2, gz: 0, rot: 90, sx: 1, sz: 2 },
-  { model: "roadStraightLong", gx: 3, gz: 0, rot: 90, sx: 1, sz: 2 },
-  { model: "roadStraightArrow", gx: 4, gz: 0, rot: 90 },
-  { model: "roadStraight", gx: 4, gz: -1, rot: 90 },
+  // ═══ BRIDGE SECTION (High, y=6) ═══
+  // Crossing West-East over the center (Z=0)
+  { model: "roadStraightBridge", gx: 0, gz: 0, rot: 90, y: 6 },
+  { model: "roadStraightBridge", gx: -1, gz: 0, rot: 90, y: 6 },
+  { model: "roadStraightBridge", gx: 1, gz: 0, rot: 90, y: 6 },
 
-  // ═══ TURN 1 — Bottom-right (large corner, right turn going up) ═══
-  { model: "roadCornerLargeBorder", gx: 5, gz: -1, rot: 0, sx: 2, sz: 2 },
+  // ═══ EAST RAMP & LOOP ═══
+  // Ramp Down (East side) - High West -> Low East
+  // Rot 270: Up-East (Right). Rot 90: Up-West (Left).
+  // We want Up-West (to connect to bridge at gx=1).
+  { model: "roadRampLong", gx: 2, gz: 0, rot: 90, y: 0 },
 
-  // ═══ RIGHT STRAIGHT (going up -Z) ═══
-  { model: "roadStraightLong", gx: 6, gz: -3, rot: 0, sx: 1, sz: 2 },
-  { model: "roadStraight", gx: 6, gz: -5, rot: 0 },
-  { model: "roadStraightArrow", gx: 6, gz: -6, rot: 0 },
-  { model: "roadStraightLong", gx: 6, gz: -7, rot: 0, sx: 1, sz: 2 },
+  // Turn South (Right Turn)
+  // Enters from West (gx=3), Exits South (gz=2)
+  { model: "roadCornerLarge", gx: 3, gz: 0, rot: 90, sx: 2, sz: 2, y: 0 },
 
-  // ═══ TURN 2 — Top-right (large corner) ═══
-  { model: "roadCornerLargerBorder", gx: 3, gz: -9, rot: 270, sx: 3, sz: 3 },
+  // South Straight (Heading South)
+  { model: "roadStraightArrow", gx: 4, gz: 2, rot: 0, y: 0 },
 
-  // ═══ TOP STRAIGHT (going left -X) ═══
-  { model: "roadStraightLong", gx: 2, gz: -9, rot: 270, sx: 1, sz: 2 },
-  { model: "roadStraightArrow", gx: 0, gz: -9, rot: 270 },
-  { model: "roadStraight", gx: -1, gz: -9, rot: 270 },
-  { model: "roadStraightLong", gx: -2, gz: -9, rot: 270, sx: 1, sz: 2 },
+  // Turn West (Right Turn)
+  // Enters from North (gz=3), Exits West (gx=3)
+  // Rot 180 (Ent +Z, Ex -X)
+  { model: "roadCornerLarge", gx: 2, gz: 3, rot: 180, sx: 2, sz: 2, y: 0 },
 
-  // ═══ TURN 3 — Top-left (larger corner) ═══
-  { model: "roadCornerLargerBorder", gx: -4, gz: -9, rot: 180, sx: 3, sz: 3 },
+  // West Straight (Bottom Leg)
+  { model: "roadStraightLong", gx: 0, gz: 4, rot: 90, y: 0 },
+  { model: "roadStraightLong", gx: -2, gz: 4, rot: 90, y: 0 },
 
-  // ═══ LEFT STRAIGHT (going down +Z) ═══
-  { model: "roadStraightLong", gx: -4, gz: -6, rot: 180, sx: 1, sz: 2 },
-  { model: "roadStraight", gx: -4, gz: -4, rot: 180 },
-  { model: "roadStraightArrow", gx: -4, gz: -3, rot: 180 },
-  { model: "roadStraightLong", gx: -4, gz: -2, rot: 180, sx: 1, sz: 2 },
+  // Turn North (Right Turn)
+  // Enters from East (gx=-1), Exits North (gz=3)
+  // Rot 270 (Ent -X, Ex -Z)
+  { model: "roadCornerLarge", gx: -4, gz: 2, rot: 270, sx: 2, sz: 2, y: 0 },
 
-  // ═══ TURN 4 — Bottom-left (large corner, back to start) ═══
-  { model: "roadCornerLargeBorder", gx: -4, gz: 0, rot: 90, sx: 2, sz: 2 },
+  // ═══ UNDERPASS (Northbound) ═══
+  // Crossing Z=0 under the bridge
+  { model: "roadStraightLong", gx: -3, gz: 0, rot: 0, y: 0 },
+  // Start Line positioned before the bridge
+  { model: "roadStartPositions", gx: -3, gz: -2, rot: 0, y: 0 },
 
-  // ═══ CONNECTING STRAIGHT back to start ═══
-  { model: "roadStraightLong", gx: -2, gz: 0, rot: 90, sx: 1, sz: 2 },
-  { model: "roadStraight", gx: -1, gz: 0, rot: 90 },
-  { model: "roadStraight", gx: -1, gz: -1, rot: 90 },
+  // ═══ WEST LOOP & RAMP ═══
+  // Turn East (Right Turn)
+  // Enters from South (gz=-3), Exits East (gx=-2)
+  // Rot 0 (Ent -Z, Ex +X)
+  { model: "roadCornerLarge", gx: -3, gz: -4, rot: 0, sx: 2, sz: 2, y: 0 },
+
+  // Ramp Up (West side) - Low West -> High East
+  // Rot 270: Up-East (Right).
+  { model: "roadRampLong", gx: -2, gz: 0, rot: 270, y: 0 },
 ];
 
-// Decoration placements
 const DECOR_TILES: TileDef[] = [
-  // Grandstands
-  { model: "grandStand", gx: 1, gz: 2, rot: 0 },
-  { model: "grandStandRound", gx: 3, gz: 2, rot: 0 },
-  { model: "grandStand", gx: -2, gz: -11, rot: 180 },
+  // Grandstands near the bridge and turns
+  { model: "grandStand", gx: 1, gz: -2, rot: 180, y: 0 },
+  { model: "grandStandRound", gx: 4, gz: -1, rot: 225, y: 0 },
+  { model: "grandStand", gx: -4, gz: 0, rot: 90, y: 0 },
 
-  // Pit area
-  { model: "pitsGarage", gx: -2, gz: 2, rot: 0 },
-  { model: "pitsGarageClosed", gx: -3, gz: 2, rot: 0 },
-  { model: "pitsOffice", gx: -4, gz: 2, rot: 0 },
+  // Pits along the underpass straight
+  { model: "pitsGarage", gx: -5, gz: 0, rot: 90, y: 0 },
+  { model: "pitsGarageClosed", gx: -5, gz: -1, rot: 90, y: 0 },
+  { model: "pitsOffice", gx: -5, gz: 1, rot: 90, y: 0 },
+
+  // Overheads
+  { model: "overhead", gx: -3, gz: -2.5, rot: 0, y: 0 }, // Start Line Overhead
 
   // Billboards
-  { model: "billboard", gx: 7.5, gz: -5, rot: 270 },
-  { model: "billboardLow", gx: -5.5, gz: -5, rot: 90 },
+  { model: "billboard", gx: 0, gz: 6, rot: 180, y: 0 },
+  { model: "billboardLow", gx: 0, gz: -2, rot: 0, y: 6 }, // On the bridge?
 
-  // Start/finish decorations
-  { model: "overhead", gx: 0, gz: -0.5, rot: 90 },
-  { model: "flagCheckers", gx: -0.3, gz: 1.2, rot: 0 },
-  { model: "flagCheckers", gx: -0.3, gz: -2.2, rot: 0 },
+  // Flags & Lights
+  { model: "flagCheckers", gx: -3.5, gz: -2, rot: 0, y: 0 },
+  { model: "flagCheckers", gx: -2.5, gz: -2, rot: 0, y: 0 },
+  { model: "lightPost", gx: -1.5, gz: 0, rot: 90, y: 0 },
+  { model: "lightPost", gx: -4.5, gz: 0, rot: 270, y: 0 },
+  { model: "lightModern", gx: 0, gz: -1, rot: 0, y: 6 }, // Bridge light
 
-  // Light posts around the circuit
-  { model: "lightPost", gx: 5, gz: 1.3, rot: 0 },
-  { model: "lightPost", gx: 5, gz: -2.3, rot: 0 },
-  { model: "lightModern", gx: 7.5, gz: -2, rot: 0 },
-  { model: "lightModern", gx: 7.5, gz: -7, rot: 0 },
-  { model: "lightPost", gx: 3, gz: -12, rot: 0 },
-  { model: "lightPost", gx: -1, gz: -12, rot: 0 },
-  { model: "lightModern", gx: -5.5, gz: -8, rot: 0 },
-  { model: "lightModern", gx: -5.5, gz: -3, rot: 0 },
-  { model: "lightPost", gx: -5.5, gz: 1, rot: 0 },
-
-  // Banners
-  { model: "bannerGreen", gx: 2, gz: -2.3, rot: 90 },
-  { model: "bannerRed", gx: 2, gz: 1.3, rot: 90 },
-  { model: "bannerGreen", gx: 7.5, gz: -4.5, rot: 0 },
-  { model: "bannerRed", gx: -5.5, gz: -6, rot: 0 },
-
-  // Pylons on corners
-  { model: "pylon", gx: 5, gz: -1.5, rot: 0 },
-  { model: "pylon", gx: 5.5, gz: -1, rot: 0 },
-  { model: "pylon", gx: 3, gz: -9.5, rot: 0 },
-  { model: "pylon", gx: -4, gz: -9.5, rot: 0 },
-  { model: "pylon", gx: -4.5, gz: 0, rot: 0 },
-  { model: "pylon", gx: -4.5, gz: -0.5, rot: 0 },
-
-  // Grass tufts around the outside
-  { model: "grass", gx: 8, gz: 1, rot: 30 },
-  { model: "grass", gx: 8.5, gz: -1, rot: 120 },
-  { model: "grass", gx: 8, gz: -8, rot: 45 },
-  { model: "grass", gx: 8.5, gz: -10, rot: 200 },
-  { model: "grass", gx: 4, gz: -12.5, rot: 80 },
-  { model: "grass", gx: 0, gz: -12.5, rot: 160 },
-  { model: "grass", gx: -3, gz: -12.5, rot: 40 },
-  { model: "grass", gx: -6, gz: -10, rot: 290 },
-  { model: "grass", gx: -6.5, gz: -1, rot: 110 },
-  { model: "grass", gx: -6, gz: 2, rot: 170 },
-  { model: "grass", gx: 5.5, gz: 2.5, rot: 60 },
-  { model: "grass", gx: 1, gz: 3, rot: 230 },
-  { model: "grass", gx: -1, gz: 3, rot: 310 },
+  // Vegetation
+  { model: "treeLarge", gx: 5, gz: 4, rot: 0, y: 0 },
+  { model: "grass", gx: 5, gz: 4, rot: 45, y: 0 },
+  { model: "grass", gx: -5, gz: 4, rot: 120, y: 0 },
+  { model: "grass", gx: 2, gz: -3, rot: 10, y: 0 },
 
   // Fences
-  { model: "fenceStraight", gx: 7.2, gz: 1, rot: 0 },
-  { model: "fenceStraight", gx: 7.2, gz: 0, rot: 0 },
-  { model: "fenceStraight", gx: -5.2, gz: 1, rot: 0 },
-  { model: "fenceStraight", gx: -5.2, gz: 0, rot: 0 },
+  { model: "fenceStraight", gx: -3, gz: 1.5, rot: 90, y: 0 },
+  { model: "fenceStraight", gx: -3, gz: -3.5, rot: 90, y: 0 },
 ];
 
 // ── GLB renderer ────────────────────────────────────────────────────
@@ -254,7 +233,7 @@ export function RacingKitDecor({ sampledTrack: _sampledTrack, trackWidth: _track
         model: tile.model,
         position: [
           (tile.gx + (tile.sx ?? 1) / 2) * s,
-          0.0001,
+          tile.y ?? 0.0001,
           (tile.gz + (tile.sz ?? 1) / 2) * s,
         ],
         rotation: [0, rad, 0],
@@ -289,6 +268,8 @@ export function RacingKitDecor({ sampledTrack: _sampledTrack, trackWidth: _track
       barrierRed: s * 0.3,
       barrierWhite: s * 0.3,
       barrierWall: s * 0.3,
+      treeLarge: s * 0.5,
+      treeSmall: s * 0.35,
     };
 
     for (const tile of DECOR_TILES) {
@@ -298,7 +279,7 @@ export function RacingKitDecor({ sampledTrack: _sampledTrack, trackWidth: _track
         model: tile.model,
         position: [
           (tile.gx + 0.5) * s,
-          0.0001,
+          tile.y ?? 0.0001,
           (tile.gz + 0.5) * s,
         ],
         rotation: [0, rad, 0],

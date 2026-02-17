@@ -234,10 +234,36 @@ export function MainMenu({ onStartGame, isLoading = false }: MainMenuProps) {
   }, [players.length, view, online.gameMode]);
 
   // ---- Start Game ----
+  /** Debounce guard para evitar double-click no botão "Iniciar" */
+  const GAME_START_COOLDOWN_MS = 4_000;
   const startingRef = useRef(false);
+  const startCooldownRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup do timeout ao desmontar + reset quando o menu volta a ser interativo
+  useEffect(() => {
+    if (!isLoading) {
+      startingRef.current = false;
+      if (startCooldownRef.current) {
+        clearTimeout(startCooldownRef.current);
+        startCooldownRef.current = null;
+      }
+    }
+    return () => {
+      if (startCooldownRef.current) {
+        clearTimeout(startCooldownRef.current);
+        startCooldownRef.current = null;
+      }
+    };
+  }, [isLoading]);
+
   const handleStartGame = useCallback(() => {
     if (startingRef.current) return;
     startingRef.current = true;
+    // Auto-reset como safety valve (ex: falha de rede impede transição normal)
+    startCooldownRef.current = setTimeout(() => {
+      startingRef.current = false;
+      startCooldownRef.current = null;
+    }, GAME_START_COOLDOWN_MS);
     let finalPlayers = players.map(p => {
       const isMe = p.id === networkManager.myId || p.id === "player-1" || (!p.isBot && p.isHost);
       return isMe ? { ...p, name: playerName } : p;

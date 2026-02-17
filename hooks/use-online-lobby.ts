@@ -38,6 +38,8 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
   const unsubscribersRef = useRef<Array<() => void>>([]);
   // Track last settings received from server to prevent echo loop
   const serverSettingsRef = useRef<{ mapId: string; laps: number } | null>(null);
+  // Track last players state received from server to avoid echo loops
+  const serverPlayersRef = useRef<Player[]>([]);
 
   // --- Select Mode ---
   const handleSelectMode = useCallback((mode: "local" | "online") => {
@@ -180,9 +182,6 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
       networkManager.cleanup();
     }
   }, [inputCode, t, players, setPlayers, setSelectedMap, setLaps, setView, onStartGame]);
-
-  // Track last players state received from server to avoid echo loops
-  const serverPlayersRef = useRef<Player[]>([]);
 
   // --- Sync settings to server (host only) ---
   useEffect(() => {

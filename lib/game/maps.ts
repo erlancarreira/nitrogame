@@ -305,17 +305,20 @@ export const MAPS: MapConfig[] = [
     //   [-20, -10],
     // ],
     startPositions: [
-      // Start at gx 0..1 area, facing +X
-      [5, 1, -5],
-      [5, 1, -15],
-      [15, 1, -5],
-      [15, 1, -15],
-      [25, 1, -5],
-      [25, 1, -15],
-      [35, 1, -5],
-      [35, 1, -15],
+      // New layout start (Underpass straight, gx=-3, gz=-2 area)
+      // Facing North (-Z).
+      // gx=-3 -> x center -50. gz=-2 -> z center -30.
+      // Spread karts slightly along Z (behind start) and X (lanes).
+      [-48, 1, -25], // Right lane, Front
+      [-52, 1, -25], // Left lane, Front
+      [-48, 1, -15], // Right lane, Back
+      [-52, 1, -15], // Left lane, Back
+      [-48, 1, -5],
+      [-52, 1, -5],
+      [-48, 1, 5],
+      [-52, 1, 5],
     ],
-    startRotation: 0, // Facing +X
+    startRotation: Math.PI, // Facing North (-Z)
   },
   {
     id: "rainbow-road-pro",

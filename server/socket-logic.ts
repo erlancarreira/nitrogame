@@ -94,7 +94,7 @@ function guard(socket: Socket, key: string, conf: { limit: number; intervalMs: n
 // Input Validation Constants
 const MAX_NAME_LENGTH = 20;
 const COLOR_REGEX = /^#[0-9a-fA-F]{3,8}$/;
-const VALID_MAP_IDS = ["green-valley", "sunset-circuit", "frost-peak", "neon-nights"];
+const VALID_MAP_IDS = ["green-valley", "sunset-circuit", "frost-peak", "neon-nights", "volcano-rush", "crystal-caves", "cyber-loop", "turbo-speedway"];
 const VALID_LAPS = [1, 2, 3, 5, 10];
 const MAX_ROOM_CODE_ATTEMPTS = 50;
 

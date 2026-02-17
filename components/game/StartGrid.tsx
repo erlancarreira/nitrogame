@@ -1,4 +1,4 @@
-import React from "react";
+
 import type { MapConfig } from "@/lib/game/maps";
 
 interface StartGridProps {

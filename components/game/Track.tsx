@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useCallback } from "react";
-import { useFrame } from "@react-three/fiber";
+import React, { useEffect, useMemo, useRef } from "react";
+
 import { RigidBody, CuboidCollider, ConvexHullCollider } from "@react-three/rapier";
 import { Line, useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
@@ -22,7 +22,8 @@ function getArchGeo() {
 }
 import type { MapConfig } from "@/lib/game/maps";
 import { ForestDecor } from "./ForestDecor";
-import { generateTrackPath, cleanPoints } from "@/lib/game/track-utils";
+import { RacingKitDecor } from "./RacingKitDecor";
+import { generateTrackPath, cleanPoints, getDecorScale } from "@/lib/game/track-utils";
 
 // ── Constants ───────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ const GROUND_COLOR_BASE = 0.85;
 
 // Chevron direction indicators
 const CHEVRON_PAIR_GAP = 1.4;
-const CHEVRON_GROUP_SPACING = 4;
+
 const CHEVRON_Y = 0.15;
 const CHEVRON_SCALE = 1.8;
 const CHEVRON_SKIP_RATIO = 0.08;
@@ -53,6 +54,10 @@ const MESH_SAMPLES_DEFAULT = 300;
 const WALL_HEIGHT = 2.5;
 const WALL_THICKNESS = 0.5;
 const WALL_COLOR_BAND_SIZE = 5;
+
+const WORLD_SCALE = 20
+const PROP_BASE_SCALE = 5
+const PROP_RATIO = PROP_BASE_SCALE / WORLD_SCALE
 
 // ── Seeded RNG ──────────────────────────────────────────────────────
 
@@ -229,19 +234,23 @@ export function Track({
     return geo;
   }, [groundSizeX, groundSizeZ, grassColor, map.id]);
 
+  const isRacingKit = (decorationType as string) === "racing-kit";
+
   return (
     <group>
-      {/* Track surface + barrier walls */}
-      <TrackMeshes
-        trackWidth={trackWidth}
-        curve={racingLineCurve}
-        trackColor={trackColor}
-        barrierColors={barrierColors}
-        hasCustomPath={hasCustomPath}
-        textureUrl={map.textureUrl}
-        textureScale={map.textureScale}
-        textureCrop={map.textureCrop}
-      />
+      {/* Track surface + barrier walls (hidden for racing-kit — GLB pieces provide visuals) */}
+      {!isRacingKit && (
+        <TrackMeshes
+          trackWidth={trackWidth}
+          curve={racingLineCurve}
+          trackColor={trackColor}
+          barrierColors={barrierColors}
+          hasCustomPath={hasCustomPath}
+          textureUrl={map.textureUrl}
+          textureScale={map.textureScale}
+          textureCrop={map.textureCrop}
+        />
+      )}
 
       {/* Physics walls */}
       <TrackColliders trackWidth={trackWidth} curve={racingLineCurve} />
@@ -266,12 +275,16 @@ export function Track({
           ))}
 
       {/* Center line */}
-      {showCenterLine && <Line points={linePoints} color="#ffffff" lineWidth={1} />}
+      {showCenterLine && !isRacingKit && <Line points={linePoints} color="#ffffff" lineWidth={1} />}
 
       {/* Environment decorations */}
       {decorationType === "forest" ? (
         <React.Suspense fallback={null}>
           <ForestDecor sampledTrack={sampledTrack} trackWidth={trackWidth} seed={map.id} />
+        </React.Suspense>
+      ) : isRacingKit ? (
+        <React.Suspense fallback={null}>
+          <RacingKitDecor sampledTrack={sampledTrack} trackWidth={trackWidth} />
         </React.Suspense>
       ) : (
         <React.Suspense fallback={null}>
@@ -279,20 +292,22 @@ export function Track({
         </React.Suspense>
       )}
 
-      {/* Chevron direction indicators */}
-      {showArrows && chevronTransforms.length > 0 && (
+      {/* Chevron direction indicators (hidden for racing-kit) */}
+      {showArrows && !isRacingKit && chevronTransforms.length > 0 && (
         <instancedMesh ref={chevronsRef} args={[chevronGeometry, undefined, chevronTransforms.length]} frustumCulled={false}>
           <primitive object={chevronMaterial} attach="material" />
         </instancedMesh>
       )}
 
-      {/* Start/Finish arch (shared geometries + InstancedMesh for checkers) */}
-      <StartFinishArch
-        position={startLine.position}
-        rotation={startLine.rotation}
-        trackWidth={trackWidth}
-        barrierColor={barrierColors[0]}
-      />
+      {/* Start/Finish arch (hidden for racing-kit — uses its own GLB arch) */}
+      {!isRacingKit && (
+        <StartFinishArch
+          position={startLine.position}
+          rotation={startLine.rotation}
+          trackWidth={trackWidth}
+          barrierColor={barrierColors[0]}
+        />
+      )}
     </group>
   );
 }
@@ -673,13 +688,13 @@ function ProceduralDecor({
         result.push({
           position: [pos.x, 0, pos.z],
           rotation: [0, rand() * Math.PI * 2, 0],
-          scale: 0.8 + rand() * 0.4,
+          scale: (0.8 + rand() * 0.4) * PROP_RATIO,
           variant: Math.floor(rand() * 3),
         });
       }
     }
     return result;
-  }, [sampledTrack, trackWidth, seed]);
+  }, [sampledTrack, trackWidth, seed, type]);
 
   switch (type) {
     case "desert":

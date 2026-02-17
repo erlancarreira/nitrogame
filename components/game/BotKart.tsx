@@ -132,6 +132,7 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
   const _direction = useRef(new THREE.Vector3());
   const _currentPos = useRef(new THREE.Vector3());
   const lastGroundSample = useRef(0);
+  const prevSetSpeed = useRef(0);
 
   const preset = useMemo<KartPhysicsConfig>(() => {
     if (!physicsPreset) return PRESET_STANDARD;
@@ -360,33 +361,32 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     let vx = _forward.current.x * currentSpeed.current;
     let vz = _forward.current.z * currentSpeed.current;
 
-    // Wall/kart collision: trust Rapier's post-collision direction, limit magnitude
+    // Wall/kart collision: compare against LAST FRAME's set speed
     const currentV = body.linvel();
     const rapierSqXZ = currentV.x * currentV.x + currentV.z * currentV.z;
-    if (rapierSqXZ > 0.25 && currentSpeed.current > 0.5) {
+    const lastSet = prevSetSpeed.current;
+
+    if (rapierSqXZ > 0.25 && lastSet > 1) {
       const rapierMag = Math.sqrt(rapierSqXZ);
-      const fwd = _forward.current;
-      const dot = currentV.x * fwd.x + currentV.z * fwd.z;
-      const alignment = dot / rapierMag;
-      if (alignment < 0.85) {
+
+      if (rapierMag < lastSet * 0.85) {
+        const fwd = _forward.current;
         const rapierDirX = currentV.x / rapierMag;
         const rapierDirZ = currentV.z / rapierMag;
         const rapierForwardDot = rapierDirX * fwd.x + rapierDirZ * fwd.z;
         if (rapierForwardDot > 0) {
-          const useMag = Math.min(rapierMag, Math.abs(currentSpeed.current));
-          vx = rapierDirX * useMag;
-          vz = rapierDirZ * useMag;
+          vx = currentV.x;
+          vz = currentV.z;
         } else {
           vx = 0;
           vz = 0;
         }
-        // Always sync speed during collision + impact penalty
-        const impactFactor = Math.max(0.3, alignment);
         const actualSpeed = Math.sqrt(vx * vx + vz * vz);
-        currentSpeed.current = Math.min(Math.abs(currentSpeed.current), actualSpeed) * impactFactor;
+        currentSpeed.current = actualSpeed;
       }
     }
 
+    prevSetSpeed.current = Math.sqrt(vx * vx + vz * vz);
     const safeVel = clampLinvel({ x: vx, y: verticalVel, z: vz }, settings.maxSpeed * VELOCITY_CLAMP_FACTOR);
     body.setLinvel(safeVel, true);
 

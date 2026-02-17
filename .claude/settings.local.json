@@ -30,7 +30,10 @@
       "WebFetch(domain:mixkit.co)",
       "Bash(npx:*)",
       "Bash(npm ls:*)",
-      "Read(//c/Users/erlan/.claude/projects/c--YMONETIZE-Labs-mario-kart-mario-kart-clone/memory/**)"
+      "Read(//c/Users/erlan/.claude/projects/c--YMONETIZE-Labs-mario-kart-mario-kart-clone/memory/**)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

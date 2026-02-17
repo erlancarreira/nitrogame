@@ -59,7 +59,7 @@ function smoothTowards(
       a.velocity[2] + (b.velocity[2] - a.velocity[2]) * factor,
     ],
 
-    speed: bothIdle ? 0 : b.speed,
+    speed: bothIdle ? 0 : a.speed + (b.speed - a.speed) * factor,
     lap: b.lap,
     lapProgress: b.lapProgress,
 

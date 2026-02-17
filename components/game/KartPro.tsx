@@ -123,6 +123,9 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const _axis = useRef(new THREE.Vector3(0, 1, 0));
     // Smoothed Y to filter Rapier ground contact solver micro-bounce
     const smoothedY = useRef(position[1]);
+    // Track what speed we SET last frame, so collision detection compares against
+    // last frame's target (not current frame's, which is always higher during acceleration).
+    const prevSetSpeed = useRef(0);
     // Track spline for lap progress (industry-standard spline projection)
     const trackSplineRef = useRef<TrackSpline | null>(null);
     const progressRef = useRef(0);
@@ -336,41 +339,39 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                     let vx = forwardX * clampedSpeed;
                     let vz = forwardZ * clampedSpeed;
 
-                    // Wall/kart collision handling:
-                    // Rapier's post-step velocity reflects collision response.
-                    // When misaligned from intended direction, a collision occurred.
-                    // Trust Rapier's direction, sync core speed to actual (no compounding penalty).
+                    // Wall/kart collision: compare Rapier's actual speed against what
+                    // we SET LAST FRAME (not current intended, which is always higher
+                    // during acceleration — especially reverse with BRAKE=35).
                     const rapierSqXZ = currentV.x * currentV.x + currentV.z * currentV.z;
-                    if (rapierSqXZ > 0.25) {
-                        const rapierMag = Math.sqrt(rapierSqXZ);
-                        const dot = currentV.x * forwardX + currentV.z * forwardZ;
-                        const alignment = dot / rapierMag;
+                    const lastSet = prevSetSpeed.current;
 
-                        if (alignment < 0.7) {
-                            // Collision detected — use Rapier's post-collision velocity
+                    if (rapierSqXZ > 0.25 && lastSet > 1) {
+                        const rapierMag = Math.sqrt(rapierSqXZ);
+
+                        if (rapierMag < lastSet * 0.85) {
+                            // Collision: Rapier couldn't maintain last frame's speed.
                             const rapierDirX = currentV.x / rapierMag;
                             const rapierDirZ = currentV.z / rapierMag;
-
                             const rapierForwardDot = rapierDirX * forwardX + rapierDirZ * forwardZ;
+
                             if (rapierForwardDot > 0) {
-                                const useMag = Math.min(rapierMag, Math.abs(clampedSpeed));
-                                vx = rapierDirX * useMag;
-                                vz = rapierDirZ * useMag;
+                                // Wall slide: use Rapier velocity as-is
+                                vx = currentV.x;
+                                vz = currentV.z;
                             } else {
-                                // Head-on wall — stop
+                                // Head-on wall: stop
                                 vx = 0;
                                 vz = 0;
                             }
 
-                            // Sync core speed to actual body speed (no multiplier penalty).
-                            // This prevents speed accumulation while blocked by wall.
+                            // Feed actual speed back to core → natural re-acceleration
                             const actualSpeed = Math.sqrt(vx * vx + vz * vz);
-                            if (actualSpeed < Math.abs(state.speed)) {
-                                state.speed = Math.sign(state.speed) * actualSpeed;
-                            }
+                            state.speed = Math.sign(state.speed) * actualSpeed;
                         }
                     }
 
+                    // Remember what we're setting for next frame's comparison
+                    prevSetSpeed.current = Math.sqrt(vx * vx + vz * vz);
                     body.setLinvel({ x: vx, y: vy, z: vz }, true);
                 }
 

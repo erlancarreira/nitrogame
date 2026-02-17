@@ -218,6 +218,78 @@ export const MAPS: MapConfig[] = [
       [5, 1, -205],
     ],
   },
+  {
+    id: "turbo-speedway",
+    name: "Turbo Speedway",
+    description: "A professional circuit with sweeping curves and chicanes",
+    difficulty: "medium",
+    trackColor: "#3a3a3a",
+    grassColor: "#3d7a1e",
+    barrierColors: ["#ff2222", "#ffffff"],
+    skyPreset: "day",
+    trackType: "circuit",
+    trackWidth: 20,
+    trackLength: 400,
+    curveRadius: 120,
+    decorationType: "racing-kit" as "forest",
+    thumbnail: "red",
+    // Grid-based circuit (TILE_SIZE=20). Path follows center of road tiles.
+    // Circuit: start(+X) → turn1(BR) → straight(-Z) → turn2(TR) →
+    //          straight(-X) → turn3(TL) → straight(+Z) → turn4(BL) → start
+    // pathPoints: [
+    //   // Start/finish straight (+X direction, z center = -10)
+    //   [0, -10],
+    //   [20, -10],
+    //   [40, -10],
+    //   [60, -10],
+    //   [80, -10],
+    //   // Turn 1 — bottom-right (large 2x2 corner)
+    //   [100, -15],
+    //   [115, -30],
+    //   [120, -45],
+    //   // Right straight (-Z direction, x center = 130)
+    //   [130, -70],
+    //   [130, -100],
+    //   [130, -120],
+    //   [130, -150],
+    //   [130, -170],
+    //   // Turn 2 — top-right (larger 3x3 corner)
+    //   [120, -190],
+    //   [100, -200],
+    //   [80, -200],
+    //   // Top straight (-X direction, z center = -190)
+    //   [50, -190],
+    //   [20, -190],
+    //   [0, -190],
+    //   [-20, -190],
+    //   // Turn 3 — top-left (larger 3x3 corner)
+    //   [-50, -195],
+    //   [-70, -185],
+    //   [-80, -170],
+    //   // Left straight (+Z direction, x center = -80)
+    //   [-80, -140],
+    //   [-80, -110],
+    //   [-80, -80],
+    //   [-80, -50],
+    //   // Turn 4 — bottom-left (large 2x2 corner)
+    //   [-75, -25],
+    //   [-60, -12],
+    //   [-40, -10],
+    //   [-20, -10],
+    // ],
+    startPositions: [
+      // Start at gx 0..1 area, facing +X
+      [5, 1, -5],
+      [5, 1, -15],
+      [15, 1, -5],
+      [15, 1, -15],
+      [25, 1, -5],
+      [25, 1, -15],
+      [35, 1, -5],
+      [35, 1, -15],
+    ],
+    startRotation: 0, // Facing +X
+  },
 ];
 
 export function getMapById(id: string): MapConfig | undefined {

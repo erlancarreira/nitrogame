@@ -40,6 +40,7 @@ function getMapIdColor(id: string) {
     case "volcano-rush": return "from-red-500 to-orange-600";
     case "crystal-caves": return "from-blue-400 to-purple-500";
     case "cyber-loop": return "from-green-400 to-cyan-500";
+    case "turbo-speedway": return "from-red-500 to-slate-700";
     default: return "from-slate-400 to-slate-600";
   }
 }
@@ -216,7 +217,7 @@ export function LobbyView({
                 </h3>
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 md:gap-2.5 flex-1 overflow-y-auto pr-1 custom-scrollbar">
                   {AVAILABLE_MAPS.map((map) => {
-                    const isAvailable = map.id === "green-valley";
+                    const isAvailable = map.id === "green-valley" || map.id === "turbo-speedway";
                     return (
                       <button
                         key={map.id}

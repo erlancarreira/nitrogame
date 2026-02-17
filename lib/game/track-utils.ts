@@ -4,6 +4,16 @@ import { generateTrackPoints } from "./track-path";
 
 export const TRACK_PATH_SAMPLES = 64;
 
+export function getDecorScale(type: string) {
+    switch (type) {
+        case "city": return 0.25;
+        case "forest": return 0.3;
+        case "desert": return 0.22;
+        case "snow": return 0.28;
+        default: return 0.25;
+    }
+}
+
 /**
  * Generates a THREE.Vector3[] track path from the map config.
  * Delegates to generateTrackPoints() (single source of truth for track geometry)

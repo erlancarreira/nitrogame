@@ -86,11 +86,11 @@ function DrawCallLogger() {
     const now = performance.now();
     if (now - lastLog.current > 3000) {
       lastLog.current = now;
-      const { render, memory } = gl.info;
-      console.log(
-        `[Render] drawCalls=${render.calls} triangles=${render.triangles} ` +
-        `textures=${memory.textures} geometries=${memory.geometries}`
-      );
+      // const { render, memory } = gl.info;
+      // console.log(
+      //   `[Render] drawCalls=${render.calls} triangles=${render.triangles} ` +
+      //   `textures=${memory.textures} geometries=${memory.geometries}`
+      // );
     }
   });
   return null;

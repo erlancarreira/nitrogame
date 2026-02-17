@@ -7,7 +7,7 @@ import { Physics } from "@react-three/rapier";
 import type { MapConfig } from "@/lib/game/maps";
 import type { Player, Controls } from "@/lib/game/types";
 import { SNAPSHOT_RATE } from "@/types/network";
-import { Track } from "./Track";
+import { Track } from "./track/Track";
 import { StartGrid } from "./StartGrid";
 import { KartPro as Kart, type KartRef } from "./KartPro";
 import { BotKart } from "./BotKart";

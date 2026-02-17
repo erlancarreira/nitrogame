@@ -28,11 +28,22 @@ export interface MapConfig {
   itemBoxPositions?: [number, number, number][];
 
   // Novo sistema (opcional, para não quebrar)
+  // Novo sistema (modular)
   trackSystem?: {
-    type: 'legacy' | 'spline-tiles';
+    type: 'legacy' | 'spline-tiles' | 'spline' | 'tile-kit' | 'model'; // Expanded types
+
     // Para spline-tiles:
     seed?: string;
     tiles?: PlacedTile[]; // Tiles pré-gerados (opcional)
+
+    // Para tile-kit:
+    kit?: 'racing-kit' | 'future-kit';
+    layout?: 'circuit' | 'oval' | 'figure8' | 'custom';
+
+    // Para model:
+    modelUrl?: string;
+    modelScale?: number;
+
     difficulty?: 'easy' | 'medium' | 'hard' | 'expert';
     features?: {
       terrain: boolean;
@@ -247,7 +258,7 @@ export const MAPS: MapConfig[] = [
     trackWidth: 20,
     trackLength: 400,
     curveRadius: 120,
-    decorationType: "racing-kit" as "forest",
+    decorationType: "forest",
     thumbnail: "red",
     // Grid-based circuit (TILE_SIZE=20). Path follows center of road tiles.
     // Circuit: start(+X) → turn1(BR) → straight(-Z) → turn2(TR) →

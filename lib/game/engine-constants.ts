@@ -7,7 +7,7 @@
 export const MAX_DELTA = 0.05;
 
 /** How often (seconds) karts report position for lap progress / network. */
-export const POSITION_UPDATE_INTERVAL = 0.066; // 15Hz
+export const POSITION_UPDATE_INTERVAL = 0.05; // 20Hz — matches SNAPSHOT_RATE for smooth remote interpolation
 
 /** Y offset added to grid position when spawning a kart. */
 export const SPAWN_Y_OFFSET = 0.0;

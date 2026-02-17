@@ -13,6 +13,7 @@ import { KartDriftSmoke, getRearWheelPositions } from "./KartEffects";
 import { PlayerNameTag } from "./PlayerNameTag";
 import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, POSITION_UPDATE_INTERVAL, KART_MODEL_OFFSET } from '@/lib/game/engine-constants';
 import { useNetworkPrediction } from "@/hooks/useNetworkPrediction";
+import { applyBoost as coreApplyBoost, applyStarPower as coreApplyStarPower } from "@/lib/game/kart-physics-core";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ interface KartProps {
 export interface KartRef {
     getPosition: () => [number, number, number];
     getRotation: () => number;
+    getLinvel: () => { x: number; y: number; z: number } | null;
     getGroup: () => THREE.Group | null;
     applyBoost: (strength?: number, duration?: number) => void;
     applyStarPower: (duration?: number) => void;
@@ -104,12 +106,9 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     const oilSlipTime = useRef(0);
     const isSpinningOut = useRef(false);
     const spinOutTime = useRef(0);
-    const spinOutDuration = 1.2; // seconds — full spin animation length
 
     // Timer cleanup tracking
     const activeTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
-    const boostTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const starTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const safeTimeout = (fn: () => void, ms: number) => {
         const id = setTimeout(() => {
             activeTimers.current.delete(id);
@@ -122,6 +121,8 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     // Reusable objects to avoid GC pressure in useFrame
     const _quat = useRef(new THREE.Quaternion());
     const _axis = useRef(new THREE.Vector3(0, 1, 0));
+    // Smoothed Y to filter Rapier ground contact solver micro-bounce
+    const smoothedY = useRef(position[1]);
     // Track spline for lap progress (industry-standard spline projection)
     const trackSplineRef = useRef<TrackSpline | null>(null);
     const progressRef = useRef(0);
@@ -137,19 +138,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
 
     // Destructure constants for use inside tight loops
     const MAX_SPEED = preset.maxSpeed;
-    const ACCEL = preset.acceleration;
-    const BRAKE = preset.brakeForce;
-    const TURN_SPEED = preset.turnSpeed;
-    const DRAG = preset.drag;
-    const DRIFT_SPEED_THRESHOLD = preset.driftSpeedThreshold;
-    const DRIFT_TURN_BONUS = preset.driftTurnBonus;
-    const DRIFT_SLIDE_FACTOR = preset.driftSlideFactor;
     const DRIFT_BOOST_Tiers = preset.driftBoostTiers;
-    const DRIFT_BOOST_SPEEDS = preset.driftBoostSpeeds;
-    const DRIFT_BOOST_DURATION = preset.driftBoostDuration;
-    const REVERSE_SPEED_RATIO = preset.reverseSpeedRatio;
-    const SPEED_FACTOR_DIVISOR = preset.speedFactorDivisor;
-    const MIN_TURN_SPEED = preset.minTurnSpeed;
     const BODY_MASS = preset.mass;
 
     // Network prediction hook (usado apenas para o jogador local)
@@ -175,32 +164,23 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             return [t.x, t.y, t.z];
         },
         getRotation: () => currentRotation.current,
+        getLinvel: () => {
+            if (!rigidBodyRef.current) return null;
+            const v = rigidBodyRef.current.linvel();
+            return { x: v.x, y: v.y, z: v.z };
+        },
         getGroup: () => groupRef.current,
         applyBoost: (strength = 1.5, duration = 2) => {
-            // Cancel previous boost timeout to prevent premature reset
-            if (boostTimeoutRef.current) {
-                clearTimeout(boostTimeoutRef.current);
-                activeTimers.current.delete(boostTimeoutRef.current);
-            }
+            // Write directly to core physics state — timer is handled by core's boostTimeRemaining decay
+            const coreState = network.getPhysicsState();
+            if (coreState) coreApplyBoost(coreState, strength, duration);
             boostStrength.current = strength;
-            boostTimeoutRef.current = safeTimeout(() => {
-                boostStrength.current = 1;
-                boostTimeoutRef.current = null;
-            }, duration * 1000);
         },
         applyStarPower: (duration = 8) => {
-            // Cancel previous star timeout to prevent premature reset
-            if (starTimeoutRef.current) {
-                clearTimeout(starTimeoutRef.current);
-                activeTimers.current.delete(starTimeoutRef.current);
-            }
+            const coreState = network.getPhysicsState();
+            if (coreState) coreApplyStarPower(coreState, 1.3, duration);
             isInvincible.current = true;
-            boostStrength.current = 1.3; // Speed boost constant
-            starTimeoutRef.current = safeTimeout(() => {
-                isInvincible.current = false;
-                boostStrength.current = 1;
-                starTimeoutRef.current = null;
-            }, duration * 1000);
+            boostStrength.current = 1.3;
         },
         applyOilSlip: (duration = 2.5) => {
             if (isInvincible.current) return;
@@ -218,7 +198,7 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
 
     const lastUpdateTime = useRef(0);
 
-    useFrame((state, delta) => {
+    useFrame((state) => {
         const body = rigidBodyRef.current;
         if (!body) return;
 
@@ -261,8 +241,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             }
             return;
         }
-
-        const input = controlsRef.current;
 
         // --- INPUT LOGIC (Read once per frame) ---
         let throttle = 0;
@@ -337,31 +315,64 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 // --- Physics Integration: Velocity Driving (Collision Friendly) ---
                 // Instead of teleporting (setTranslation), we drive the body with target velocity.
                 // This allows Rapier to resolve wall collisions naturally.
-
-                const currentT = body.translation();
                 const currentV = body.linvel();
 
-                // 1. Calculate target velocity vector from Core state
-                // state.speed is the magnitude; state.rotation is the direction
-                // CLAMP SPEED: Prevent physics explosions if core goes wild
-                const clampedSpeed = THREE.MathUtils.clamp(state.speed, -MAX_SPEED * 1.5, MAX_SPEED * 1.5);
+                // Damp vertical micro-bounce: gravity + ground contact creates high-freq Y oscillation.
+                // Without this, rear wheels visibly tremble. Only damp small Y velocities.
+                let vy = currentV.y;
+                if (Math.abs(vy) < 2.0) vy *= 0.8;
 
-                const forwardX = Math.sin(state.rotation);
-                const forwardZ = Math.cos(state.rotation);
-                const targetVx = forwardX * clampedSpeed;
-                const targetVz = forwardZ * clampedSpeed;
+                // Target velocity from Core state
+                // Use boosted max for clamp so boost speeds aren't artificially limited
+                const boostedMax = MAX_SPEED * Math.max(state.boostStrength, 1);
+                const clampedSpeed = THREE.MathUtils.clamp(state.speed, -boostedMax, boostedMax);
+                const SPEED_DEAD_ZONE = 0.05;
 
-                // 2. Blend current velocity with target velocity
-                // Use TIME-DEPENDENT blend to be FPS independent
-                const stiffness = 8; // Higher = tighter tracking of core
-                const blend = 1 - Math.exp(-stiffness * delta);
+                if (Math.abs(clampedSpeed) < SPEED_DEAD_ZONE) {
+                    body.setLinvel({ x: 0, y: vy, z: 0 }, true);
+                } else {
+                    const forwardX = Math.sin(state.rotation);
+                    const forwardZ = Math.cos(state.rotation);
+                    let vx = forwardX * clampedSpeed;
+                    let vz = forwardZ * clampedSpeed;
 
-                const newVx = THREE.MathUtils.lerp(currentV.x, targetVx, blend);
-                const newVz = THREE.MathUtils.lerp(currentV.z, targetVz, blend);
+                    // Wall/kart collision handling:
+                    // Rapier's post-step velocity reflects collision response.
+                    // When misaligned from intended direction, a collision occurred.
+                    // Trust Rapier's direction, sync core speed to actual (no compounding penalty).
+                    const rapierSqXZ = currentV.x * currentV.x + currentV.z * currentV.z;
+                    if (rapierSqXZ > 0.25) {
+                        const rapierMag = Math.sqrt(rapierSqXZ);
+                        const dot = currentV.x * forwardX + currentV.z * forwardZ;
+                        const alignment = dot / rapierMag;
 
-                // 3. Apply Velocity
-                // We trust Rapier for Y (gravity/jumps) but drive X/Z to match Core.
-                body.setLinvel({ x: newVx, y: currentV.y, z: newVz }, true);
+                        if (alignment < 0.7) {
+                            // Collision detected — use Rapier's post-collision velocity
+                            const rapierDirX = currentV.x / rapierMag;
+                            const rapierDirZ = currentV.z / rapierMag;
+
+                            const rapierForwardDot = rapierDirX * forwardX + rapierDirZ * forwardZ;
+                            if (rapierForwardDot > 0) {
+                                const useMag = Math.min(rapierMag, Math.abs(clampedSpeed));
+                                vx = rapierDirX * useMag;
+                                vz = rapierDirZ * useMag;
+                            } else {
+                                // Head-on wall — stop
+                                vx = 0;
+                                vz = 0;
+                            }
+
+                            // Sync core speed to actual body speed (no multiplier penalty).
+                            // This prevents speed accumulation while blocked by wall.
+                            const actualSpeed = Math.sqrt(vx * vx + vz * vz);
+                            if (actualSpeed < Math.abs(state.speed)) {
+                                state.speed = Math.sign(state.speed) * actualSpeed;
+                            }
+                        }
+                    }
+
+                    body.setLinvel({ x: vx, y: vy, z: vz }, true);
+                }
 
                 // 4. Force Rotation (Visuals)
                 // We still snap rotation because drifting visuals depend heavily on precise angle
@@ -377,9 +388,13 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 // This ensures the camera doesn't clip through walls if the physics body is stopped by one.
                 const finalT = body.translation();
                 tx = finalT.x;
-                ty = finalT.y;
                 tz = finalT.z;
                 rot = state.rotation;
+
+                // Smooth Y for camera only (filters Rapier ground-contact solver micro-bounce).
+                // The model stays at the raw body Y to avoid appearing suspended.
+                smoothedY.current += (finalT.y - smoothedY.current) * 0.4;
+                ty = smoothedY.current;
             } else {
                 // Fallback if state is null (e.g. not initialized)
                 const t = body.translation();
@@ -390,13 +405,6 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
                 const v = body.linvel();
                 currentSpeed.current = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
             }
-        } else {
-            // Remote players or fallback
-            const t = body.translation();
-            tx = t.x;
-            ty = t.y;
-            tz = t.z;
-            rot = currentRotation.current;
         }
 
         // Clean up: Visual Steering reference
@@ -452,13 +460,13 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             mass={BODY_MASS}
             lockRotations           // só gira em Y
             gravityScale={1}        // Enable gravity so it settles on track
-            linearDamping={2}       // freio natural
+            linearDamping={0}       // Velocity fully controlled via setLinvel; damping would fight it
             angularDamping={5}      // evita rodar demais
         >
             <CuboidCollider
                 args={COLLIDER_HALF_EXTENTS}
                 position={COLLIDER_OFFSET}
-                friction={0.5}
+                friction={0}
                 restitution={0}
             />
 

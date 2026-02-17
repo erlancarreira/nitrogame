@@ -29,7 +29,8 @@
       "WebFetch(domain:opengameart.org)",
       "WebFetch(domain:mixkit.co)",
       "Bash(npx:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Read(//c/Users/erlan/.claude/projects/c--YMONETIZE-Labs-mario-kart-mario-kart-clone/memory/**)"
     ]
   }
 }

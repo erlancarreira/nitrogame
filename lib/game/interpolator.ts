@@ -1,23 +1,42 @@
 import type { InterpolatedState } from "../../types/network";
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 export type Snapshot = {
-    t: number; // serverTime
+    t: number;  // serverTime (from sender's netClock)
+    lt: number; // localTime (performance.now() at reception) — used for interpolation
     p: [number, number, number];
     r: number;
     s: number;
     l: number;
     seq?: number;
+    vx?: number; // velocity X (real, from Rapier body)
+    vz?: number; // velocity Z (real, from Rapier body)
 };
 
 class SnapshotBuffer {
     private snapshots: Snapshot[] = [];
-    // Aumentado para 200ms para permitir mais suavidade na interpolação
-    private static MAX_EXTRAPOLATION_TIME = 200; // ms
-    // Aumentado o buffer de interpolação para 100ms
-    private static INTERPOLATION_DELAY_MS = 100; // ms
+    private static MAX_EXTRAPOLATION_MS = 300;
+
+    // Visual smoothing state — prevents snapping when new packets arrive
+    private smoothPos: [number, number, number] | null = null;
+    private smoothRot: number | null = null;
+
+    // Dedup: track recent server timestamps to reject duplicate POS messages.
+    // The same POS arrives via both WebRTC (fast) and Socket.IO relay (slow)
+    // with identical `t` but different `lt` — without dedup, the buffer gets
+    // interleaved duplicates that cause zigzag interpolation (teleportation).
+    private recentTs = new Set<number>();
 
     add(snapshot: Snapshot) {
-        // Se o buffer estiver vazio, adiciona diretamente
+        // Dedup by server timestamp — both transport paths carry identical t
+        if (this.recentTs.has(snapshot.t)) return;
+        this.recentTs.add(snapshot.t);
+        if (this.recentTs.size > 30) {
+            // Prune oldest (Set iterates in insertion order)
+            this.recentTs.delete(this.recentTs.values().next().value!);
+        }
+
         if (this.snapshots.length === 0) {
             this.snapshots.push(snapshot);
             return;
@@ -25,16 +44,9 @@ class SnapshotBuffer {
 
         const newest = this.snapshots[this.snapshots.length - 1];
 
-        // Rejeita apenas se for EXATAMENTE o mesmo timestamp ou mais antigo
-        // Isso permite pacotes com delay mas ainda úteis
-        if (snapshot.t <= newest.t) {
-            // Se for muito próximo (menos de 5ms), descarta como duplicado
-            if (newest.t - snapshot.t < 5) {
-                return;
-            }
-            // Se for um pouco mais antigo mas ainda dentro da janela útil,
-            // insere na posição correta em vez de descartar
-            const insertIndex = this.snapshots.findIndex(s => s.t > snapshot.t);
+        if (snapshot.lt <= newest.lt) {
+            // Out-of-order but still usable: insert in sorted position by lt
+            const insertIndex = this.snapshots.findIndex(s => s.lt > snapshot.lt);
             if (insertIndex !== -1) {
                 this.snapshots.splice(insertIndex, 0, snapshot);
             } else {
@@ -44,140 +56,173 @@ class SnapshotBuffer {
             this.snapshots.push(snapshot);
         }
 
-        // Keep only last 2 seconds (aumentado para ter mais buffer)
-        const threshold = snapshot.t - 2000;
-        if (this.snapshots[0].t < threshold) {
-            const keepIndex = this.snapshots.findIndex(s => s.t >= threshold);
+        // Prune: keep only last 2 seconds (by local time)
+        const threshold = snapshot.lt - 2000;
+        if (this.snapshots[0].lt < threshold) {
+            const keepIndex = this.snapshots.findIndex(s => s.lt >= threshold);
             if (keepIndex > 0) {
                 this.snapshots = this.snapshots.slice(keepIndex);
             }
         }
     }
 
+    // Debug: throttle logs to avoid console spam
+    private _lastDebugLog = 0;
+
+    /**
+     * Get interpolated state at a given LOCAL renderTime (performance.now() based).
+     * All interpolation is done in the `lt` (local time) domain, making it
+     * completely independent of clock synchronization between clients.
+     */
     getState(renderTime: number): InterpolatedState | null {
         if (this.snapshots.length === 0) return null;
 
         const newest = this.snapshots[this.snapshots.length - 1];
         const oldest = this.snapshots[0];
 
-        // 1. Extrapolation (Dead Reckoning)
-        if (renderTime >= newest.t) {
-            const timeDiff = renderTime - newest.t;
+        let rawState: InterpolatedState;
 
-            // Limit extrapolation to avoid karts driving through walls indefinitely
-            if (timeDiff > SnapshotBuffer.MAX_EXTRAPOLATION_TIME) {
-                // Clamp to max extrapolation
-                return this.extrapolate(newest, SnapshotBuffer.MAX_EXTRAPOLATION_TIME);
-            }
+        // 1. Extrapolation (renderTime is ahead of newest)
+        if (renderTime >= newest.lt) {
+            const timeDiff = renderTime - newest.lt;
 
-            return this.extrapolate(newest, timeDiff);
-        }
-
-        // 2. Interpolation
-        // Find pair A, B where A.t <= renderTime <= B.t
-        for (let i = this.snapshots.length - 1; i >= 0; i--) {
-            const A = this.snapshots[i];
-            // If we found a snapshot before renderTime, look for the next one
-            if (A.t <= renderTime) {
-                // If there is a next snapshot B
-                if (i + 1 < this.snapshots.length) {
-                    const B = this.snapshots[i + 1];
-                    const range = B.t - A.t;
-                    if (range <= 0.001) return this.mapToState(A);
-
-                    const t = (renderTime - A.t) / range;
-                    return this.interpolateSmooth(A, B, t);
-                } else {
-                    // If no future snapshot exists, always extrapolate 0ms
-                    return this.extrapolate(A, 0);
+            // Debug: log when we're stuck extrapolating
+            if (IS_DEV && timeDiff > 100) {
+                const now = performance.now();
+                if (now - this._lastDebugLog > 1000) {
+                    this._lastDebugLog = now;
+                    console.warn(
+                        `[interp] EXTRAPOLATING ${timeDiff.toFixed(0)}ms ahead | ` +
+                        `buf=${this.snapshots.length} | newest.lt=${newest.lt.toFixed(0)} | ` +
+                        `renderTime=${renderTime.toFixed(0)} | gap=${(now - newest.lt).toFixed(0)}ms since last pkt`
+                    );
                 }
             }
+
+            const clampedDiff = Math.min(timeDiff, SnapshotBuffer.MAX_EXTRAPOLATION_MS);
+            rawState = this.extrapolate(newest, clampedDiff);
+        }
+        // 2. Interpolation — find pair A, B where A.lt <= renderTime <= B.lt
+        else {
+            let found = false;
+            for (let i = this.snapshots.length - 1; i >= 0; i--) {
+                const A = this.snapshots[i];
+                if (A.lt <= renderTime) {
+                    if (i + 1 < this.snapshots.length) {
+                        const B = this.snapshots[i + 1];
+                        const range = B.lt - A.lt;
+                        if (range <= 0.001) {
+                            rawState = this.mapToState(A);
+                        } else {
+                            const alpha = Math.min(Math.max((renderTime - A.lt) / range, 0), 1);
+                            rawState = this.interpolateLerp(A, B, alpha);
+                        }
+                    } else {
+                        rawState = this.extrapolate(A, 0);
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                // 3. Pre-buffer (renderTime < oldest)
+                rawState = this.mapToState(oldest);
+            }
         }
 
-        // 3. Pre-buffer (renderTime < oldest)
-        // If we are asking for a time before our buffer, we just return the oldest known state.
-        return this.mapToState(oldest);
+        // Apply visual smoothing — lerp towards raw to prevent snapping
+        if (this.smoothPos === null) {
+            this.smoothPos = [...rawState!.position];
+            this.smoothRot = rawState!.rotation;
+        } else {
+            // Smooth factor: 0.35 gives responsive-but-smooth blending at 60fps
+            // Higher = more responsive, lower = smoother but more latent
+            const SMOOTH_FACTOR = 0.35;
+            this.smoothPos[0] += (rawState!.position[0] - this.smoothPos[0]) * SMOOTH_FACTOR;
+            this.smoothPos[1] += (rawState!.position[1] - this.smoothPos[1]) * SMOOTH_FACTOR;
+            this.smoothPos[2] += (rawState!.position[2] - this.smoothPos[2]) * SMOOTH_FACTOR;
+            this.smoothRot = lerpAngle(this.smoothRot!, rawState!.rotation, SMOOTH_FACTOR);
+
+            // Anti-teleport: if distance is huge, snap immediately (e.g. respawn)
+            const dx = rawState!.position[0] - this.smoothPos[0];
+            const dz = rawState!.position[2] - this.smoothPos[2];
+            if (dx * dx + dz * dz > 25) { // >5m = teleport, snap
+                this.smoothPos = [...rawState!.position];
+                this.smoothRot = rawState!.rotation;
+            }
+        }
+
+        return {
+            position: [this.smoothPos[0], this.smoothPos[1], this.smoothPos[2]],
+            rotation: this.smoothRot!,
+            speed: rawState!.speed,
+            lapProgress: rawState!.lapProgress,
+        };
     }
 
     private mapToState(s: Snapshot): InterpolatedState {
         return {
-            position: s.p,
+            position: [s.p[0], s.p[1], s.p[2]],
             rotation: s.r,
             speed: s.s,
             lapProgress: s.l,
         };
     }
 
-    private interpolate(A: Snapshot, B: Snapshot, t: number): InterpolatedState {
-        return {
-            position: [
-                lerp(A.p[0], B.p[0], t),
-                A.p[1], // força Y fixo
-                lerp(A.p[2], B.p[2], t),
-            ],
-            rotation: lerpAngle(A.r, B.r, t),
-            speed: lerp(A.s, B.s, t),
-            lapProgress: lerp(A.l, B.l, t),
-        };
-    }
-
     /**
-     * Interpolação suave com easing para reduzir micro-jitters
+     * Linear interpolation between two snapshots.
+     * Uses plain lerp (no easing) — easing on interpolation causes the "go back and snap"
+     * artefact because ease-in-out decelerates at start and end, which at high packet rates
+     * makes the visual position oscillate around the true position.
      */
-    private interpolateSmooth(A: Snapshot, B: Snapshot, t: number): InterpolatedState {
-        // Aplica easing suave (ease-in-out) para transições mais naturais
-        const smoothT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-        
+    private interpolateLerp(A: Snapshot, B: Snapshot, alpha: number): InterpolatedState {
         return {
             position: [
-                lerp(A.p[0], B.p[0], smoothT),
-                A.p[1], // mantém Y fixo para evitar flutuação
-                lerp(A.p[2], B.p[2], smoothT),
+                lerp(A.p[0], B.p[0], alpha),
+                lerp(A.p[1], B.p[1], alpha),
+                lerp(A.p[2], B.p[2], alpha),
             ],
-            rotation: lerpAngleSmooth(A.r, B.r, smoothT),
-            speed: lerp(A.s, B.s, smoothT),
-            lapProgress: lerp(A.l, B.l, smoothT),
+            rotation: lerpAngle(A.r, B.r, alpha),
+            speed: lerp(A.s, B.s, alpha),
+            lapProgress: lerp(A.l, B.l, alpha),
         };
     }
 
     /**
-     * Projects state forward based on the last known velocity (implicit from previous snapshot or speed)
-     * For now, we use a simple projection based on the car's orientation and speed.
-     * This is smoother than calculating delta-pos between two snapshots which can be jittery.
+     * Extrapolation using real velocity when available (handles curves/drift correctly),
+     * falling back to speed * forward direction when velocity is unavailable.
      */
     private extrapolate(anchor: Snapshot, dt_ms: number): InterpolatedState {
         const dt_sec = dt_ms / 1000;
 
-        // Simple linear projection using speed and rotation
-        // position = old_pos + forward_vector * speed * dt
+        let dx: number, dz: number;
 
-        const angle = anchor.r;
-        const speed = anchor.s;
-
-        const dx = Math.sin(angle) * speed * dt_sec;
-        const dz = Math.cos(angle) * speed * dt_sec;
+        if (anchor.vx !== undefined && anchor.vz !== undefined) {
+            // Use real velocity — accurate during drift/curves
+            dx = anchor.vx * dt_sec;
+            dz = anchor.vz * dt_sec;
+        } else {
+            // Fallback: speed * forward direction
+            dx = Math.sin(anchor.r) * anchor.s * dt_sec;
+            dz = Math.cos(anchor.r) * anchor.s * dt_sec;
+        }
 
         return {
             position: [
                 anchor.p[0] + dx,
-                anchor.p[1], // Assume flat ground for short extrapolation
-                anchor.p[2] + dz
+                anchor.p[1],
+                anchor.p[2] + dz,
             ],
             rotation: anchor.r,
             speed: anchor.s,
-            lapProgress: anchor.l // Extrapolating lap progress is risky, keep static
+            lapProgress: anchor.l,
         };
     }
 }
 
 export class SnapshotInterpolator {
     private buffers = new Map<string, SnapshotBuffer>();
-
-    // Track last packet reception time (monotonic) to prune inactive entities
     private lastPacketTimes = new Map<string, number>();
-
-    // We remove 'lastRenderTimes' to allow re-evaluation if needed, 
-    // though typically render time increases monotonically.
 
     addSnapshot(id: string, snapshot: Snapshot) {
         let buf = this.buffers.get(id);
@@ -187,16 +232,12 @@ export class SnapshotInterpolator {
         }
 
         buf.add(snapshot);
-
-        // Track activity using local monotonic time
         this.lastPacketTimes.set(id, performance.now());
     }
 
     getInterpolatedState(id: string, renderTime: number): InterpolatedState | null {
         const buf = this.buffers.get(id);
         if (!buf) return null;
-
-        // Pass through to buffer logic (handles interpolation & extrapolation)
         return buf.getState(renderTime);
     }
 
@@ -204,7 +245,6 @@ export class SnapshotInterpolator {
         const result: string[] = [];
 
         for (const [id, lastPacket] of this.lastPacketTimes) {
-            // Keep alive for 3 seconds without packets
             if (now - lastPacket <= 3000) {
                 result.push(id);
             } else {
@@ -226,19 +266,6 @@ function lerpAngle(a: number, b: number, t: number) {
     while (diff < -Math.PI) diff += Math.PI * 2;
     while (diff > Math.PI) diff -= Math.PI * 2;
     return a + diff * t;
-}
-
-/**
- * Interpolação de ângulo com suavização adicional
- */
-function lerpAngleSmooth(a: number, b: number, t: number) {
-    let diff = b - a;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    
-    // Aplica uma curva de suavização suave
-    const smoothT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    return a + diff * smoothT;
 }
 
 export const interpolator = new SnapshotInterpolator();

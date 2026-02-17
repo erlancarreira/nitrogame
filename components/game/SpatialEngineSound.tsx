@@ -39,14 +39,6 @@ interface SpatialEngineSoundProps {
     }>;
     /** Bot kart refs (keyed by id) */
     botRefs: React.MutableRefObject<Record<string, KartRef>>;
-    /** Remote kart data ref (keyed by id) */
-    remoteKartDataRef?: React.MutableRefObject<Record<string, {
-        pos: [number, number, number];
-        rot: number;
-        speed: number;
-        lapProgress: number;
-        t: number;
-    }>>;
     /** Racer states ref (for real-time speed data) */
     racerStatesRef?: React.MutableRefObject<Map<string, RacerState>>;
     /** Bot player definitions (for maxSpeed/difficulty) */
@@ -66,7 +58,6 @@ const DIFFICULTY_MAX_SPEED: Record<string, number> = {
 export function SpatialEngineSound({
     playerTransformRef,
     botRefs,
-    remoteKartDataRef,
     racerStatesRef,
     botPlayers,
     botDifficulty,

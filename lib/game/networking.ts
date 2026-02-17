@@ -15,7 +15,7 @@ export type NetworkMessage =
     | { type: "PLAYER_UPDATE"; player: Player }
     | { type: "START_GAME"; mapId: string; laps: number; players: Player[]; raceStartTime?: number }
     | { type: "KICK_PLAYER"; playerId: string }
-    | { type: "POS"; id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq?: number }
+    | { type: "POS"; id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq?: number; vx?: number; vz?: number }
     | { type: "ITEM_HIT"; targetId: string; effect: "spinOut" | "oilSlip" | "boost"; itemId?: string; itemType?: "banana" | "oil" | "shell" }
     | { type: "PLAYER_FINISHED"; id: string; finishTime: number; lap: number }
     | { type: "SHELL_SPAWN"; shell: { id: string; ownerId: string; targetId: string | null; startPosition: [number, number, number]; startRotation: number } }
@@ -66,15 +66,16 @@ const SERVER_URL = (isRunningRemote && isLocalhostConfig)
     : (envServer || (IS_DEV ? "http://localhost:3001" : ""));
 
 
-// ---- Binary POS Encoding (38 bytes vs ~120 JSON) ----
-// Layout: [marker:1][id_len:1][id:N][x:4][y:4][z:4][rot:4][speed:4][lapProgress:4][timestamp:8][seq:2]
-// Using Float32 for position/rotation/speed, Float64 for timestamp, Uint16 for sequence
+// ---- Binary POS Encoding ----
+// Layout v2: [marker:1][id_len:1][id:N][x:4][y:4][z:4][rot:4][speed:4][lapProgress:4][timestamp:8][seq:2][vx:4][vz:4]
+// Using Float32 for position/rotation/speed/velocity, Float64 for timestamp, Uint16 for sequence
+// vx/vz = real Rapier velocity for accurate remote extrapolation during drift/curves
 
 const POS_HEADER = 0x50; // 'P' ASCII — magic byte to identify binary POS packets
 
-function encodePosMessage(msg: { id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq: number }): ArrayBuffer {
+function encodePosMessage(msg: { id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq: number; vx?: number; vz?: number }): ArrayBuffer {
     const idBytes = new TextEncoder().encode(msg.id);
-    const buf = new ArrayBuffer(2 + idBytes.length + 32 + 2); // Added 2 bytes for seq
+    const buf = new ArrayBuffer(2 + idBytes.length + 32 + 2 + 8); // +8 for vx(4)+vz(4)
     const view = new DataView(buf);
     let offset = 0;
 
@@ -90,14 +91,16 @@ function encodePosMessage(msg: { id: string; p: [number, number, number]; r: num
     view.setFloat32(offset, msg.s, true); offset += 4;
     view.setFloat32(offset, msg.l, true); offset += 4;
     view.setFloat64(offset, msg.t, true); offset += 8;
-    view.setUint16(offset, msg.seq || 0, true); // offset += 2;
+    view.setUint16(offset, msg.seq || 0, true); offset += 2;
+    view.setFloat32(offset, msg.vx ?? 0, true); offset += 4;
+    view.setFloat32(offset, msg.vz ?? 0, true); // offset += 4;
 
     return buf;
 }
 
-function decodePosMessage(buf: ArrayBuffer): { type: "POS"; id: string; p: [number, number, number]; r: number; s: number; l: number; t: number; seq: number } | null {
+function decodePosMessage(buf: ArrayBuffer): NetworkMessage | null {
     const view = new DataView(buf);
-    if (view.byteLength < 6 || view.getUint8(0) !== POS_HEADER) return null; // Min size check increased
+    if (view.byteLength < 6 || view.getUint8(0) !== POS_HEADER) return null;
 
     let offset = 0;
     offset++; // skip header
@@ -116,8 +119,14 @@ function decodePosMessage(buf: ArrayBuffer): { type: "POS"; id: string; p: [numb
 
     // Safety check for old packets or malformed
     const seq = offset + 2 <= view.byteLength ? view.getUint16(offset, true) : 0;
+    offset += 2;
 
-    return { type: "POS", id, p: [x, y, z], r, s, l, t, seq };
+    // v2 fields: vx/vz (backwards compatible — old packets won't have these bytes)
+    const vx = offset + 4 <= view.byteLength ? view.getFloat32(offset, true) : undefined;
+    offset += 4;
+    const vz = offset + 4 <= view.byteLength ? view.getFloat32(offset, true) : undefined;
+
+    return { type: "POS", id, p: [x, y, z], r, s, l, t, seq, vx, vz };
 }
 
 export class NetworkManager {

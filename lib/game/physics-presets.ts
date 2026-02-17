@@ -15,6 +15,7 @@ export interface KartPhysicsConfig {
     turnSpeed: number;
     minTurnSpeed: number;
     speedFactorDivisor: number;
+    steerSmoothing: number; // Higher = faster response (lerp rate per second)
 
     // Drift
     driftSpeedThreshold: number;
@@ -39,6 +40,7 @@ export const PRESET_STANDARD: KartPhysicsConfig = {
     turnSpeed: 1.8,
     minTurnSpeed: 0.5,
     speedFactorDivisor: 10,
+    steerSmoothing: 10,
 
     driftSpeedThreshold: 8,
     driftTurnBonus: 2.2,
@@ -61,6 +63,7 @@ export const PRESET_SPEED: KartPhysicsConfig = {
     turnSpeed: 1.6,
     minTurnSpeed: 0.5,
     speedFactorDivisor: 10,
+    steerSmoothing: 8,
 
     driftSpeedThreshold: 10,
     driftTurnBonus: 2.0,
@@ -83,6 +86,7 @@ export const PRESET_DRIFT: KartPhysicsConfig = {
     turnSpeed: 2.2,
     minTurnSpeed: 0.6,
     speedFactorDivisor: 10,
+    steerSmoothing: 12,
 
     driftSpeedThreshold: 6,
     driftTurnBonus: 2.6,
@@ -105,6 +109,7 @@ export const PRESET_HEAVY: KartPhysicsConfig = {
     turnSpeed: 1.4,
     minTurnSpeed: 0.4,
     speedFactorDivisor: 12,
+    steerSmoothing: 7,
 
     driftSpeedThreshold: 10,
     driftTurnBonus: 1.8,

@@ -100,6 +100,10 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
         networkManager.onPlayerDisconnected((peerId) => {
           setPlayers(prev => prev.filter(p => p.id !== peerId));
         }),
+        networkManager.onReconnected(() => {
+          // Servidor re-enviará game-start se o jogo já começou
+          console.log("[lobby] Reconnected to server");
+        }),
       );
 
       setView("lobby");
@@ -161,6 +165,10 @@ export function useOnlineLobby(opts: UseOnlineLobbyOptions) {
         networkManager.onClose(() => {
           setConnectionStatus(t.disconnectedFromHost);
           setView("mode");
+        }),
+        networkManager.onReconnected(() => {
+          // Servidor re-enviará game-start se o jogo já começou
+          console.log("[lobby] Reconnected to server");
         }),
       );
     } catch (e) {

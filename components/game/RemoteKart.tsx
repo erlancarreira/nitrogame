@@ -1,14 +1,15 @@
 import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { RigidBody, RapierRigidBody, CuboidCollider } from '@react-three/rapier';
 import { CarModel } from './CarModel';
 import { PlayerNameTag } from './PlayerNameTag';
 import * as THREE from 'three';
-import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, KART_MODEL_OFFSET } from '@/lib/game/engine-constants';
+import { KART_MODEL_OFFSET } from '@/lib/game/engine-constants';
 import { interpolator } from '@/lib/game/interpolator';
-import { netClock } from '@/lib/netcode/netclock';
-import { INTERPOLATION_DELAY_MS } from './NetworkInterpolationLoop';
-import type { RacerState } from '@/hooks/use-race-state';
+
+// Interpolation delay in ms — render remote entities this far behind real-time
+// to ensure the buffer always has two snapshots to interpolate between.
+// POS sent at 20Hz (50ms interval), so 150ms ≈ 3 packets of buffer.
+const INTERPOLATION_DELAY_MS = 150;
 
 interface RemoteKartProps {
     id: string;
@@ -18,8 +19,6 @@ interface RemoteKartProps {
     modelUrl: string;
     modelScale: number;
     color: string;
-    // We keep this prop if needed for non-positional data, but visuals come from interpolator
-    racerStatesRef?: React.MutableRefObject<Map<string, RacerState>>;
     onInterpolatedState?: (
         id: string,
         position: [number, number, number],
@@ -30,10 +29,12 @@ interface RemoteKartProps {
 }
 
 /**
- * RemoteKart — Renders a remote player's kart.
- * 
- * DIRECT MODE: Reads directly from `interpolator` for maximum smoothness (60fps+),
- * bypassing React state or ref forwarding loops.
+ * RemoteKart — Pure visual ghost for remote players.
+ *
+ * NO RigidBody, NO Rapier, NO netClock dependency.
+ * Uses performance.now() as time source — the interpolator stores
+ * `lt` (local receive time) on each snapshot, so interpolation is
+ * fully independent of clock synchronization between clients.
  */
 export const RemoteKart = React.memo(function RemoteKart({
     id,
@@ -45,43 +46,28 @@ export const RemoteKart = React.memo(function RemoteKart({
     color,
     onInterpolatedState,
 }: RemoteKartProps) {
-    const mountPosition = useRef(initialPosition).current;
-    const mountRotation = useRef(initialRotation).current;
-
-    // Track if we have ever possessed valid data to avoid spawning at 0,0,0
+    const groupRef = useRef<THREE.Group>(null);
     const hasReceivedData = useRef(false);
-
-    const rigidBodyRef = useRef<RapierRigidBody>(null);
-
-    // Reusable objects
-    const _euler = useRef(new THREE.Euler());
-    const _quat = useRef(new THREE.Quaternion());
-    const _vec = useRef(new THREE.Vector3());
+    const _euler = useRef(new THREE.Euler(0, initialRotation, 0));
 
     useFrame(() => {
-        if (!rigidBodyRef.current) return;
+        if (!groupRef.current) return;
 
-        const serverTime = netClock.now;
-        if (serverTime <= 0) return;
+        // Use local monotonic time — no netClock dependency
+        const renderTime = performance.now() - INTERPOLATION_DELAY_MS;
 
-        const renderTime = serverTime - INTERPOLATION_DELAY_MS;
-
-        // Direct read from interpolator
         const state = interpolator.getInterpolatedState(id, renderTime);
 
         if (state) {
             hasReceivedData.current = true;
 
-            // Apply visual transform
-            _vec.current.set(state.position[0], state.position[1], state.position[2]);
-            _euler.current.set(0, state.rotation, 0);
-            _quat.current.setFromEuler(_euler.current);
+            groupRef.current.position.set(
+                state.position[0],
+                state.position[1],
+                state.position[2]
+            );
+            groupRef.current.rotation.set(0, state.rotation, 0);
 
-            // Kinematic update is instant and smooth
-            rigidBodyRef.current.setNextKinematicTranslation(_vec.current);
-            rigidBodyRef.current.setNextKinematicRotation(_quat.current);
-
-            // Single source of truth for remote transforms (minimapa, HUD, etc.)
             onInterpolatedState?.(
                 id,
                 [state.position[0], state.position[1], state.position[2]],
@@ -93,22 +79,15 @@ export const RemoteKart = React.memo(function RemoteKart({
     });
 
     return (
-        <RigidBody
-            ref={rigidBodyRef}
-            type="kinematicPosition"
-            name={id}
-            position={mountPosition}
-            rotation={[0, mountRotation, 0]}
-            colliders={false}
+        <group
+            ref={groupRef}
+            position={initialPosition}
+            rotation={_euler.current}
         >
-            <CuboidCollider
-                args={COLLIDER_HALF_EXTENTS}
-                position={COLLIDER_OFFSET}
-            />
             <group position={KART_MODEL_OFFSET}>
                 <CarModel url={modelUrl} scale={modelScale} color={color} />
                 {playerName && <PlayerNameTag name={playerName} />}
             </group>
-        </RigidBody>
+        </group>
     );
 });

@@ -30,6 +30,7 @@ interface Room {
     players: RoomPlayer[];
     settings: { mapId: string; laps: number };
     gameStarted: boolean;
+    gameConfig?: { mapId: string; laps: number; raceStartTime: number };
 }
 
 // Simulation types for authoritative server
@@ -264,6 +265,7 @@ export function setupSocketIO(io: Server) {
                             throttle: input.throttle,
                             steer: input.steer,
                             brake: input.brake,
+                            drift: input.drift,
                             useItem: input.useItem,
                         });
                         updateKartPhysics(physics, physInput, SIM_DT_MS / 1000);
@@ -274,24 +276,12 @@ export function setupSocketIO(io: Server) {
                 } else {
                     // No new input? Use last known input (Input Persistence)
                     // This prevents "braking" simulation if a packet arrives 1ms late or if client is 30Hz
-                    const stickyInput = simPlayer.lastInput || normalizeInput({ throttle: 0, steer: 0, brake: false, useItem: false });
+                    const stickyInput = simPlayer.lastInput || normalizeInput({ throttle: 0, steer: 0, brake: false, drift: false, useItem: false });
                     updateKartPhysics(physics, stickyInput, SIM_DT_MS / 1000);
                 }
 
-                if (sim.frame % 10 === 0) { // Log every 10 frames (~6 times/sec)
-                    const logLine = `${sim.frame},${socketId},${simPlayer.lastInput?.throttle.toFixed(2) ?? "N/A"},${physics.speed.toFixed(2)},${physics.position[2].toFixed(2)},${inputs.length}\n`;
-                    try {
-                        const fs = require('fs');
-                        const path = require('path');
-                        const logPath = path.join(process.cwd(), 'logs', 'server-physics.csv');
-
-                        if (!fs.existsSync(logPath)) {
-                            fs.writeFileSync(logPath, "frame,socketId,input_throttle,physics_speed,physics_z,pending_inputs_count\n");
-                        }
-
-                        fs.appendFileSync(logPath, logLine);
-                    } catch (e) { /* ignore */ }
-                }
+                // Server physics logging removed — appendFileSync blocks the event loop
+                // (~24 synchronous writes/sec with 4 players). Use client-side debug logger instead.
             }
 
             // Send snapshots
@@ -327,6 +317,11 @@ export function setupSocketIO(io: Server) {
             }
             const serverNow = Date.now();
             ack({ clientSendTime, serverTime: serverNow });
+        });
+
+        // --- PING MEASUREMENT ---
+        socket.on("ping-measure", (ack: Function) => {
+            ack?.(Date.now());
         });
 
         // --- CREATE ROOM ---
@@ -413,19 +408,43 @@ export function setupSocketIO(io: Server) {
             }
             const existingIdx = room.players.findIndex(p => p.socketId === data.playerId);
             if (existingIdx !== -1) {
+                const oldSocketId = room.players[existingIdx].socketId;
                 room.players[existingIdx].socketId = socket.id;
                 if (room.hostSocketId === data.playerId) {
                     room.hostSocketId = socket.id;
+                }
+
+                // Migrate simulation state to new socket ID (Socket.IO assigns new ID on reconnect)
+                const sim = roomSims.get(code);
+                if (sim) {
+                    const simPlayer = sim.players.get(oldSocketId);
+                    if (simPlayer) {
+                        sim.players.delete(oldSocketId);
+                        sim.players.set(socket.id, simPlayer);
+                        console.log(`[sim] Migrated SimPlayer ${oldSocketId} -> ${socket.id}`);
+                    }
                 }
             } else {
                 ack({ ok: false, error: "Player slot no longer available" });
                 return;
             }
 
+            socketIdMap.delete(data.playerId); // Clean up old mapping
             socketIdMap.set(socket.id, code);
             socket.join(code);
             console.log(`[room] ${socket.id} rejoined room ${data.code}`);
             ack({ ok: true, playerId: socket.id });
+
+            // Se o jogo já começou, re-enviar game-start para o jogador que reconectou
+            if (room.gameStarted && room.gameConfig) {
+                socket.emit("game-start", {
+                    mapId: room.gameConfig.mapId,
+                    laps: room.gameConfig.laps,
+                    players: room.players,
+                    raceStartTime: room.gameConfig.raceStartTime,
+                });
+                return;
+            }
 
             io.to(room.code).emit("lobby-update", {
                 players: room.players,
@@ -475,18 +494,29 @@ export function setupSocketIO(io: Server) {
             if (!guard(socket, "start-game", RATE.lobby)) return;
             const room = getRoomBySocket(socket.id);
             if (!room || room.hostSocketId !== socket.id) return;
+            if (room.gameStarted) return; // Guard contra double-start
             room.gameStarted = true;
-            room.players = data.players;
+
+            // Mesclar: jogadores humanos do SERVIDOR (source of truth) + bots do host
+            const serverHumans = room.players.filter(p => !p.isBot);
+            const hostBots = (data.players || []).filter((p: RoomPlayer) => p.isBot);
+            room.players = [...serverHumans, ...hostBots];
+
+            // Salvar config para re-envio em rejoin
+            room.gameConfig = {
+                mapId: data.mapId,
+                laps: data.laps,
+                raceStartTime: Date.now() + 4000,
+            };
 
             ensureRoomSimulation(room);
 
-            const raceStartTime = Date.now() + 4000;
-            console.log(`[game] Room ${room.code} started, raceStart=${raceStartTime}`);
+            console.log(`[game] Room ${room.code} started (${serverHumans.length} humans, ${hostBots.length} bots), raceStart=${room.gameConfig.raceStartTime}`);
             io.to(room.code).emit("game-start", {
-                mapId: data.mapId,
-                laps: data.laps,
-                players: data.players,
-                raceStartTime,
+                mapId: room.gameConfig.mapId,
+                laps: room.gameConfig.laps,
+                players: room.players,
+                raceStartTime: room.gameConfig.raceStartTime,
             });
         });
 

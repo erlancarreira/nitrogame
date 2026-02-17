@@ -234,7 +234,10 @@ export function MainMenu({ onStartGame, isLoading = false }: MainMenuProps) {
   }, [players.length, view, online.gameMode]);
 
   // ---- Start Game ----
+  const startingRef = useRef(false);
   const handleStartGame = useCallback(() => {
+    if (startingRef.current) return;
+    startingRef.current = true;
     let finalPlayers = players.map(p => {
       const isMe = p.id === networkManager.myId || p.id === "player-1" || (!p.isBot && p.isHost);
       return isMe ? { ...p, name: playerName } : p;

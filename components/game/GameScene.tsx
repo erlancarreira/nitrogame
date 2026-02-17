@@ -143,6 +143,12 @@ export const GameScene = React.memo(function GameScene({
   const botPlayersRemote = otherPlayers.filter((p) => p.isBot && !isHost);
   const remoteHumans = otherPlayers.filter((p) => !p.isBot);
 
+  // Stable ref for bot IDs — avoids useEffect dep churn from .filter() creating new arrays
+  const botPlayerHostIdsRef = React.useRef<Set<string>>(new Set());
+  React.useMemo(() => {
+    botPlayerHostIdsRef.current = new Set(botPlayersHost.map(b => b.id));
+  }, [players, isHost]);
+
   // Rate limiting for snapshots
   const lastBroadcastTimeRef = React.useRef<Map<string, number>>(new Map());
   const SNAPSHOT_INTERVAL_MS = 1000 / SNAPSHOT_RATE;
@@ -200,6 +206,9 @@ export const GameScene = React.memo(function GameScene({
         const seq = localSeqRef.current++;
         if (localSeqRef.current > 65535) localSeqRef.current = 0; // Uint16 wrap
 
+        // Read real Rapier velocity for accurate extrapolation on remote side
+        const vel = kartRef.current?.getLinvel?.();
+
         // Network broadcast (POS)
         networkManager.broadcast({
           type: "POS",
@@ -209,7 +218,9 @@ export const GameScene = React.memo(function GameScene({
           s: speed,
           l: progress,
           t: netClock.now, // Server Time
-          seq: seq
+          seq: seq,
+          vx: vel?.x ?? 0,
+          vz: vel?.z ?? 0,
         });
       }
     },
@@ -228,6 +239,10 @@ export const GameScene = React.memo(function GameScene({
       if (now - last >= SNAPSHOT_INTERVAL_MS) {
         lastBroadcastTimeRef.current.set(id, now);
 
+        // Bots: derive velocity from speed + rotation (no drift slide)
+        const vx = Math.sin(rot) * speed;
+        const vz = Math.cos(rot) * speed;
+
         // Network broadcast (POS)
         networkManager.broadcast({
           type: "POS",
@@ -237,6 +252,8 @@ export const GameScene = React.memo(function GameScene({
           s: speed,
           l: progress,
           t: netClock.now, // Server Time
+          vx,
+          vz,
         });
       }
     },
@@ -300,27 +317,6 @@ export const GameScene = React.memo(function GameScene({
   }, [selectedMap]);
 
   // ── Network Logic ──
-  const initialRemoteData = React.useMemo(() => {
-    const data: Record<string, { pos: [number, number, number]; rot: number; speed: number; lapProgress: number; t: number }> = {};
-    if (localPlayerId) {
-      const remoteEntities = players.filter((p) => p.id !== localPlayerId && (!networkManager.isHost || !p.isBot));
-      for (const remote of remoteEntities) {
-        const gridIdx = players.findIndex((p) => p.id === remote.id);
-        const gridPos = selectedMap.startPositions?.[gridIdx] || [0, 2, 0];
-        data[remote.id] = {
-          pos: gridPos as [number, number, number],
-          rot: startRotation,
-          speed: 0,
-          lapProgress: 0,
-          t: netClock.now,
-        };
-      }
-    }
-    return data;
-  }, [localPlayerId, players, selectedMap, startRotation]);
-  const remoteKartDataRef = React.useRef(initialRemoteData);
-  const lastNetworkUpdate = React.useRef(0);
-  const lastSnapshotTimeRef = React.useRef<Map<string, number>>(new Map());
   const localSeqRef = React.useRef(0);
 
   // Listen for network updates (GAME_SNAPSHOT + fallback POS + ITEM_HIT + PLAYER_FINISHED)
@@ -329,53 +325,34 @@ export const GameScene = React.memo(function GameScene({
       const now = performance.now();
 
       // Helper to check if we own this entity (Local Player or Host Bot)
+      // Uses stable ref instead of botPlayersHost array to avoid useEffect dep churn
       const isLocalEntity = (id: string) => {
         if (id === localPlayerId) return true;
-        // Optimization: Checking array every packet might be slow if many bots. 
-        // But for <12 players it's fine.
-        return botPlayersHost.some(b => b.id === id);
+        return botPlayerHostIdsRef.current.has(id);
       };
 
+      // GAME_SNAPSHOT is handled by useNetworkPrediction for LOCAL player reconciliation.
+      // Do NOT feed it into the interpolator for remote players — the server simulation
+      // lacks Rapier collision data, so its positions diverge from the real POS messages,
+      // causing the interpolator to oscillate between two conflicting sources (teleportation).
       if (msg.type === "GAME_SNAPSHOT") {
-        const snapshot = msg.snapshot;
-        Object.entries(snapshot.players).forEach(([id, state]) => {
-          if (isLocalEntity(id)) return;
-
-          const last = lastSnapshotTimeRef.current.get(id);
-          if (last !== undefined && snapshot.serverTime <= last) return;
-
-          lastSnapshotTimeRef.current.set(id, snapshot.serverTime);
-
-          // Only feed interpolator; RemoteKart + minimapa leem o mesmo estado interpolado
-          interpolator.addSnapshot(id, {
-            t: snapshot.serverTime,
-            p: state.position as [number, number, number],
-            r: state.rotation,
-            s: state.speed,
-            l: state.lapProgress,
-          });
-        });
         return;
       }
 
       if (msg.type === "POS") {
         if (isLocalEntity(msg.id)) return;
 
-        // POS via WebRTC or Relay
-        const last = lastSnapshotTimeRef.current.get(msg.id);
-
-        if (last !== undefined && msg.t <= last) return;
-
-        lastSnapshotTimeRef.current.set(msg.id, msg.t);
-
-        // Apenas interpolator; o resto lê via RemoteKart
+        // Feed interpolator — dedup is handled by SnapshotBuffer.add() using lt
         interpolator.addSnapshot(msg.id, {
           t: msg.t,
+          lt: now,
           p: msg.p,
           r: msg.r,
           s: msg.s,
           l: msg.l,
-          seq: msg.seq
+          seq: msg.seq,
+          vx: msg.vx,
+          vz: msg.vz,
         });
         return;
       } else if (msg.type === "PLAYER_FINISHED") {
@@ -409,7 +386,7 @@ export const GameScene = React.memo(function GameScene({
     }
 
     return unsub;
-  }, [localPlayerId, handlePositionUpdate, handleNetworkItemHit, onRemoteFinish, getWorldSnapshot, restoreWorldSnapshot, botPlayersHost]);
+  }, [localPlayerId, handlePositionUpdate, handleNetworkItemHit, onRemoteFinish, getWorldSnapshot, restoreWorldSnapshot]);
 
   return (
     <>
@@ -464,13 +441,12 @@ export const GameScene = React.memo(function GameScene({
               </>
             )}
 
-            {/* Remote humans */}
+            {/* Remote humans (pure visual ghosts — no RigidBody) */}
             {remoteHumans.map((remote) => (
               <RemoteKart
                 key={remote.id}
                 id={remote.id}
                 playerName={remote.name}
-                racerStatesRef={racerStatesRef}
                 initialPosition={selectedMap.startPositions?.[players.findIndex((p) => p.id === remote.id)] || [0, 2, 0]}
                 initialRotation={startRotation}
                 modelUrl={remote.modelUrl || DEFAULT_CAR_MODEL}
@@ -511,13 +487,12 @@ export const GameScene = React.memo(function GameScene({
               />
             ))}
 
-            {/* Remote bots (simulated by host, visualized as remote karts for clients) */}
+            {/* Remote bots (simulated by host, visualized as remote ghosts for clients) */}
             {botPlayersRemote.map((bot) => (
               <RemoteKart
                 key={bot.id}
                 id={bot.id}
                 playerName={bot.name}
-                racerStatesRef={racerStatesRef}
                 initialPosition={selectedMap.startPositions?.[players.findIndex((p) => p.id === bot.id)] || [0, 2, 0]}
                 initialRotation={startRotation}
                 modelUrl={bot.modelUrl || DEFAULT_CAR_MODEL}
@@ -589,7 +564,6 @@ export const GameScene = React.memo(function GameScene({
         <SpatialEngineSound
           playerTransformRef={playerTransformRef}
           botRefs={botRefs}
-          remoteKartDataRef={remoteKartDataRef}
           racerStatesRef={racerStatesRef}
           botPlayers={botPlayersHost}
           botDifficulty={botDifficulty}

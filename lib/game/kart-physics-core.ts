@@ -9,10 +9,8 @@
  * - Servidor: para simulação autoritativa
  */
 
-import type { PlayerInput, PlayerState } from "@/types/network";
+import type { PlayerState } from "@/types/network";
 import { KartPhysicsConfig, PRESET_STANDARD } from "./physics-presets";
-
-// ============ PHYSICS CONSTANTS ============
 
 // ============ PHYSICS CONSTANTS ============
 
@@ -58,6 +56,8 @@ export interface KartPhysicsState {
   oilSlipTime: number;
   isSpinningOut: boolean;
   spinOutTime: number;
+  currentSteer: number; // Smoothed steering value (-1 to 1)
+  boostTimeRemaining: number; // seconds remaining for active boost, 0 = no boost
 }
 
 export interface PhysicsInput {
@@ -91,6 +91,8 @@ export function createPhysicsState(
     oilSlipTime: 0,
     isSpinningOut: false,
     spinOutTime: 0,
+    currentSteer: 0,
+    boostTimeRemaining: 0,
   };
 }
 
@@ -131,6 +133,8 @@ export function playerStateToPhysics(state: PlayerState): KartPhysicsState {
     oilSlipTime: 0,
     isSpinningOut: false,
     spinOutTime: 0,
+    currentSteer: 0,
+    boostTimeRemaining: 0,
   };
 }
 
@@ -174,22 +178,30 @@ export function updateKartPhysics(
   const MIN_TURN_SPEED = config.minTurnSpeed;
 
   // Effect Constants (hardcoded in KartPro mostly, or derived)
-  const SPIN_OUT_DURATION = 1.2;
-  const SPIN_OUT_ROTATIONS = 2;
-  const OIL_SLIP_FREQUENCY = 15;
-  const OIL_SLIP_AMPLITUDE = 3.0;
+  const SPIN_OUT_DURATION  = PHYSICS_CONSTANTS.SPIN_OUT_DURATION;
+  const SPIN_OUT_ROTATIONS = PHYSICS_CONSTANTS.SPIN_OUT_ROTATIONS;
+  const OIL_SLIP_FREQUENCY = PHYSICS_CONSTANTS.OIL_SLIP_FREQUENCY;
+  const OIL_SLIP_AMPLITUDE = PHYSICS_CONSTANTS.OIL_SLIP_AMPLITUDE;
 
   // Normalize delta time to prevent huge jumps
   const safeDt = Math.min(dt, 0.1); // Max 100ms per update
 
   let throttle = input.throttle;
-  let turn = input.steer;
+  let rawTurn = input.steer;
 
   // Block input during spin out
   if (state.isSpinningOut) {
     throttle = 0;
-    turn = 0;
+    rawTurn = 0;
   }
+
+  // Smooth steering: exponential blend toward raw input for inertia feel
+  const STEER_RATE = config.steerSmoothing;
+  const steerBlend = 1 - Math.exp(-STEER_RATE * safeDt);
+  state.currentSteer += (rawTurn - state.currentSteer) * steerBlend;
+  // Snap to zero when close to avoid micro-drift
+  if (Math.abs(state.currentSteer) < 0.001) state.currentSteer = 0;
+  const turn = state.currentSteer;
 
   // ============ DRIFT LOGIC ============
   // Using explicit drift input (Option B)
@@ -215,7 +227,7 @@ export function updateKartPhysics(
 
     if (tier >= 0) {
       state.boostStrength = DRIFT_BOOST_SPEEDS[tier];
-      // Note: Boost duration handling is external
+      state.boostTimeRemaining = config.driftBoostDuration[tier];
     }
 
     state.driftTime = 0;
@@ -223,6 +235,16 @@ export function updateKartPhysics(
   } else if (state.isDrifting) {
     // Accumulate drift time
     state.driftTime += safeDt;
+  }
+
+  // ============ BOOST TIMER DECAY ============
+
+  if (state.boostTimeRemaining > 0) {
+    state.boostTimeRemaining -= safeDt;
+    if (state.boostTimeRemaining <= 0) {
+      state.boostTimeRemaining = 0;
+      state.boostStrength = 1;
+    }
   }
 
   // ============ SPEED CALCULATION ============
@@ -291,6 +313,15 @@ export function updateKartPhysics(
 
   // ============ MOVEMENT APPLICATION ============
 
+  // Hard stop: if speed is negligible AND no input, zero everything to prevent
+  // floating-point drift causing micro-movement when the kart should be static.
+  if (Math.abs(state.speed) < 0.05 && Math.abs(throttle) < 0.01 && !state.isDrifting && !state.isSpinningOut && !state.isOilSlipping) {
+    state.speed = 0;
+    state.velocity = [0, 0, 0];
+    state.driftSlideAngle = 0;
+    return state;
+  }
+
   // Drift slide angle update
   if (state.isDrifting) {
     state.driftSlideAngle = Math.min(state.driftSlideAngle + safeDt * 3.0, 1.0);
@@ -329,26 +360,32 @@ export function updateKartPhysics(
 
 export function applyBoost(
   state: KartPhysicsState,
-  strength: number = 1.5
+  strength: number = 1.5,
+  duration: number = 2
 ): void {
   state.boostStrength = strength;
+  state.boostTimeRemaining = duration;
 }
 
 export function resetBoost(state: KartPhysicsState): void {
   state.boostStrength = 1;
+  state.boostTimeRemaining = 0;
 }
 
 export function applyStarPower(
   state: KartPhysicsState,
-  strength: number = 1.3
+  strength: number = 1.3,
+  duration: number = 8
 ): void {
   state.isInvincible = true;
   state.boostStrength = strength;
+  state.boostTimeRemaining = duration;
 }
 
 export function resetStarPower(state: KartPhysicsState): void {
   state.isInvincible = false;
   state.boostStrength = 1;
+  state.boostTimeRemaining = 0;
 }
 
 export function applyOilSlip(state: KartPhysicsState): void {

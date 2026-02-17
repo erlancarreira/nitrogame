@@ -10,8 +10,10 @@ import {
   INPUT_SEND_RATE,
   FRAME_INTERVAL,
   MAX_PENDING_INPUTS,
-  createDefaultState,
 } from "@/types/network";
+
+/** FRAME_INTERVAL is in ms (1000/60 ≈ 16.67). Physics core expects seconds. */
+const FRAME_DT = FRAME_INTERVAL / 1000;
 import {
   KartPhysicsState,
   PhysicsInput,
@@ -23,30 +25,41 @@ import {
 import { networkManager } from "@/lib/game/networking";
 import { netClock } from "@/lib/netcode/netclock";
 
+/** Lerp angle via shortest arc (handles -PI/+PI wrapping) */
+function smoothAngle(a: number, b: number, factor: number): number {
+  let diff = b - a;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return a + diff * factor;
+}
+
 function smoothTowards(
   a: KartPhysicsState,
   b: KartPhysicsState,
   factor: number
 ): KartPhysicsState {
+  // Dead zone: if both speeds are near zero, don't interpolate position/velocity
+  // to prevent micro-jitter from floating point differences when idle.
+  const bothIdle = Math.abs(a.speed) < 0.05 && Math.abs(b.speed) < 0.05;
+
   return {
     ...a,
 
-    position: [
+    position: bothIdle ? [...a.position] : [
       a.position[0] + (b.position[0] - a.position[0]) * factor,
-      a.position[1] + (b.position[1] - a.position[1]) * factor,
+      a.position[1], // Y controlled by Rapier (gravity/ground), never interpolate from core
       a.position[2] + (b.position[2] - a.position[2]) * factor,
     ],
 
-    rotation:
-      a.rotation + (b.rotation - a.rotation) * factor,
+    rotation: smoothAngle(a.rotation, b.rotation, factor),
 
-    velocity: [
+    velocity: bothIdle ? [0, 0, 0] : [
       a.velocity[0] + (b.velocity[0] - a.velocity[0]) * factor,
-      a.velocity[1] + (b.velocity[1] - a.velocity[1]) * factor,
+      0, // Y velocity from Rapier
       a.velocity[2] + (b.velocity[2] - a.velocity[2]) * factor,
     ],
 
-    speed: b.speed,
+    speed: bothIdle ? 0 : b.speed,
     lap: b.lap,
     lapProgress: b.lapProgress,
 
@@ -61,17 +74,21 @@ function smoothTowards(
     oilSlipTime: b.oilSlipTime,
     isSpinningOut: b.isSpinningOut,
     spinOutTime: b.spinOutTime,
+    currentSteer: a.currentSteer + (b.currentSteer - a.currentSteer) * factor,
+    boostTimeRemaining: b.boostTimeRemaining,
   };
 }
 
 const MICRO_CORRECTION_THRESHOLD_SQ = 0.01; // 10cm squared (0.1 * 0.1)
 const SNAP_THRESHOLD_SQ = 1.0; // 1m squared
 
+/** Distance squared using only X/Z — Y is controlled by Rapier (gravity/ground)
+ *  and diverges from the core's Y=0 assumption, causing false positives in
+ *  correction thresholds that trigger constant smoothTowards jitter when idle. */
 function calculateDistSq(posA: number[], posB: number[]) {
   const dx = posA[0] - posB[0];
-  const dy = posA[1] - posB[1];
   const dz = posA[2] - posB[2];
-  return dx * dx + dy * dy + dz * dz;
+  return dx * dx + dz * dz;
 }
 
 function physicsStateToLoggable(state: KartPhysicsState) {
@@ -122,7 +139,7 @@ export function useNetworkPrediction(
     consecutiveZeroProgress: 0,
   });
 
-  const toPhysicsInput = (input: Omit<PlayerInput, "frame" | "timestamp">): PhysicsInput => {
+  const toPhysicsInput = useCallback((input: Omit<PlayerInput, "frame" | "timestamp">): PhysicsInput => {
     return normalizeInput({
       throttle: input.throttle,
       steer: input.steer,
@@ -130,7 +147,7 @@ export function useNetworkPrediction(
       drift: input.drift,
       useItem: input.useItem,
     });
-  };
+  }, []);
 
   const applyInput = useCallback(
     (state: KartPhysicsState, input: PlayerInput, dt: number): KartPhysicsState => {
@@ -164,7 +181,7 @@ export function useNetworkPrediction(
 
       for (const pending of inputsToReapply) {
         // Use fixed timestep for replay to ensure determinism matching server
-        state = applyInput(state, pending.input, FRAME_INTERVAL);
+        state = applyInput(state, pending.input, FRAME_DT);
 
         pending.predictedState = stateToPlayerState(
           kartId,
@@ -203,16 +220,8 @@ export function useNetworkPrediction(
       };
 
       // Prediction local - FORCE FIXED TIMESTEP to match Server
-      const predictedState = applyInput(renderState.current, input, FRAME_INTERVAL);
+      const predictedState = applyInput(renderState.current, input, FRAME_DT);
       renderState.current = predictedState;
-
-      // 2. Predict next state (CLIENT-SIDE PREDICTION)
-      const prevState = renderState.current;
-      // Note: PHYSICS_TIMESTEP is not defined in this scope. Assuming FRAME_INTERVAL is intended.
-      // Also, the `input` here is PlayerInput, but updateKartPhysics expects PhysicsInput.
-      // The original `applyInput` handles this conversion.
-      // Re-using `predictedState` from the line above, as it's the result of applying the input.
-      const nextState = predictedState; // Using the already calculated predictedState
 
       // Guarda no buffer
       const playerState = stateToPlayerState(
@@ -221,22 +230,25 @@ export function useNetworkPrediction(
         input.frame,
         netClock.now
       );
-      inputBuffer.current.pending.push({
-        input,
-        predictedState: playerState,
-      });
-
-      // Dynamic Buffer Scaling
-      if (inputBuffer.current.pending.length > 1000) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn(`[net-pred] Buffer large: ${inputBuffer.current.pending.length}`);
-        }
-        if (inputBuffer.current.pending.length > 2000) {
-          inputBuffer.current.pending.shift();
-        }
-      }
-
+      // Only buffer inputs when online — the server will confirm them via GAME_SNAPSHOT.
+      // In offline/local mode (no roomCode) there's no server to confirm, so buffering
+      // would grow unbounded and trigger false "Rollback muito grande" warnings.
       if (networkManager.roomCode) {
+        inputBuffer.current.pending.push({
+          input,
+          predictedState: playerState,
+        });
+
+        // Dynamic Buffer Scaling
+        if (inputBuffer.current.pending.length > 1000) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn(`[net-pred] Buffer large: ${inputBuffer.current.pending.length}`);
+          }
+          if (inputBuffer.current.pending.length > 2000) {
+            inputBuffer.current.pending.shift();
+          }
+        }
+
         networkManager.emitPlayerInput(input);
       }
 
@@ -289,6 +301,8 @@ export function useNetworkPrediction(
         oilSlipTime: 0,
         isSpinningOut: false,
         spinOutTime: 0,
+        currentSteer: 0,
+        boostTimeRemaining: 0,
       };
 
       if (inputBuffer.current.pending.length === 0) {

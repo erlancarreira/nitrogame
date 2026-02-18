@@ -9,7 +9,6 @@ import { TrackColliders } from "./shared/TrackColliders";
 import { StartFinishArch } from "./shared/StartFinishArch";
 import { GroundPlane } from "./shared/GroundPlane";
 import { ForestDecor } from "../ForestDecor";
-import { RacingKitDecor } from "../RacingKitDecor";
 
 // Constants (migrated from Track.tsx)
 const EDGE_STRIPE_WIDTH = 1.2;
@@ -154,23 +153,19 @@ export function SplineTrack({
     const groundSizeX = Math.max(400, curveRadius * 6) + trackWidth * 6;
     const groundSizeZ = Math.max(500, trackLength * 2) + trackWidth * 6;
 
-    const isRacingKit = (decorationType as string) === "racing-kit";
-
     return (
         <group>
             {/* Visual Mesh */}
-            {!isRacingKit && (
-                <TrackMeshes
-                    trackWidth={trackWidth}
-                    curve={racingLineCurve}
-                    trackColor={trackColor}
-                    barrierColors={barrierColors}
-                    hasCustomPath={hasCustomPath}
-                    textureUrl={map.textureUrl}
-                    textureScale={map.textureScale}
-                    textureCrop={map.textureCrop}
-                />
-            )}
+            <TrackMeshes
+                trackWidth={trackWidth}
+                curve={racingLineCurve}
+                trackColor={trackColor}
+                barrierColors={barrierColors}
+                hasCustomPath={hasCustomPath}
+                textureUrl={map.textureUrl}
+                textureScale={map.textureScale}
+                textureCrop={map.textureCrop}
+            />
 
             {/* Physics */}
             <TrackColliders trackWidth={trackWidth} curve={racingLineCurve} />
@@ -195,16 +190,12 @@ export function SplineTrack({
                     ))}
 
             {/* Center Line */}
-            {showCenterLine && !isRacingKit && <Line points={linePoints} color="#ffffff" lineWidth={1} />}
+            {showCenterLine && <Line points={linePoints} color="#ffffff" lineWidth={1} />}
 
             {/* Decorations */}
             {decorationType === "forest" ? (
                 <React.Suspense fallback={null}>
                     <ForestDecor sampledTrack={sampledTrack} trackWidth={trackWidth} seed={map.id} />
-                </React.Suspense>
-            ) : isRacingKit ? (
-                <React.Suspense fallback={null}>
-                    <RacingKitDecor sampledTrack={sampledTrack} trackWidth={trackWidth} />
                 </React.Suspense>
             ) : (
                 <React.Suspense fallback={null}>
@@ -213,21 +204,19 @@ export function SplineTrack({
             )}
 
             {/* Chevron Arrows */}
-            {showArrows && !isRacingKit && chevronTransforms.length > 0 && (
+            {showArrows && chevronTransforms.length > 0 && (
                 <instancedMesh ref={chevronsRef} args={[chevronGeometry, undefined, chevronTransforms.length]} frustumCulled={false}>
                     <primitive object={chevronMaterial} attach="material" />
                 </instancedMesh>
             )}
 
             {/* Start/Finish Arch */}
-            {!isRacingKit && (
-                <StartFinishArch
-                    position={startLine.position}
-                    rotation={startLine.rotation}
-                    trackWidth={trackWidth}
-                    barrierColor={barrierColors[0]}
-                />
-            )}
+            <StartFinishArch
+                position={startLine.position}
+                rotation={startLine.rotation}
+                trackWidth={trackWidth}
+                barrierColor={barrierColors[0]}
+            />
         </group>
     );
 }

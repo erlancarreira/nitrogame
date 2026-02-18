@@ -22,8 +22,6 @@ import { useRaceTimer } from "@/hooks/use-race-timer";
 import { useCountdown } from "@/hooks/use-countdown";
 import { networkManager } from "@/lib/game/networking";
 import { soundManager } from "@/lib/game/sound-manager";
-import { buildPathFromTiles } from "@/lib/game/build-path-from-tiles";
-import { CIRCUIT_TILES } from "@/lib/game/tiles";
 
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -217,14 +215,7 @@ export function Game() {
       // Re-fetch map from source to ensure full data integrity
       const currentMap = MAPS.find(m => m.id === initialMap.id) || initialMap;
 
-      const TILE_SIZE = 20;
-
-      const map = currentMap.id === "turbo-speedway" ? {
-        ...currentMap,
-        pathPoints:
-          currentMap.pathPoints ??
-          buildPathFromTiles(CIRCUIT_TILES, TILE_SIZE)
-      } : currentMap;
+      const map = currentMap;
 
       if (!map.startPositions || map.startPositions.length === 0) {
         console.error("Mapa sem posições de início definidas:", map.id);

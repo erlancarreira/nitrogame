@@ -46,7 +46,12 @@ export function Track(props: TrackProps) {
             //
             // Collider formato ExtraCollider: [halfX, halfY, halfZ, posX, posY, posZ]
             // halfY=5 → 10m de altura de parede (suficiente para karts)
-            const groundCollider = props.map.id === 'cartoon-race-track-oval'
+            const trackMeshName = props.map.id === 'cartoon-race-track-oval'
+                ? '1TARMAC_oval'
+                : undefined;
+
+            // groundCollider só quando NÃO usar trimesh
+            const groundCollider = (!trackMeshName && props.map.id === 'cartoon-race-track-oval')
                 ? [300, 160, 0, 0, -160] as [number, number, number, number, number]
                 : undefined;
 
@@ -70,6 +75,7 @@ export function Track(props: TrackProps) {
             return <ModelTrack
                 url={props.map.trackSystem?.modelUrl || props.map.modelUrl!}
                 scale={props.map.trackSystem?.modelScale || props.map.modelScale}
+                trackMeshName={trackMeshName}
                 groundCollider={groundCollider}
                 extraColliders={extraColliders}
             />;

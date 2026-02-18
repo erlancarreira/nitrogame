@@ -44,5 +44,8 @@ Tipo1/
 nul
 yarn-error.log
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # Logs
 logs/

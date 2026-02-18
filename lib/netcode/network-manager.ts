@@ -24,7 +24,7 @@ class NetworkManager {
             }
 
             if (msg.type === "time") {
-                netClock.sync(msg.serverTime)
+                netClock.addSample(msg.serverTime, performance.now())
             }
         }
     }
@@ -40,7 +40,7 @@ class NetworkManager {
     }
 
     updateRemotePlayers() {
-        const renderTime = netClock.now() - this.interpolationDelay
+        const renderTime = netClock.now - this.interpolationDelay
         const result = snapshotBuffer.get(renderTime)
         if (!result || !("older" in result)) return
 

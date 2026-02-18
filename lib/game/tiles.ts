@@ -1,6 +1,6 @@
-import type { TileDef } from "@/types/TileDef";
+import type { PathTile } from "@/types/TileDef";
 
-export const CIRCUIT_TILES: TileDef[] = [
+export const CIRCUIT_TILES: PathTile[] = [
     { gx: 0, gz: 0 },
     { gx: 1, gz: 0 },
     { gx: 2, gz: 0 },

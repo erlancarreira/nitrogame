@@ -14,7 +14,7 @@ export function TileTrack(){
             0,
             t.gz*TILE_SIZE
           ]}
-          rotation={[0,(t.rot*Math.PI)/180,0]}
+          rotation={[0,0,0]}
         >
           <boxGeometry args={[TILE_SIZE,0.1,TILE_SIZE]} />
           <meshStandardMaterial color="gray"/>

@@ -67,6 +67,14 @@ function getTrackPath(map: MapConfig): THREE.Vector3[] {
 }
 
 function generateWaypoints(map: MapConfig, count: number): THREE.Vector3[] {
+  // Para mapas com pathPoints explícitos (ex: cartoon oval), usar os pontos
+  // diretamente sem reinterpolação — a CatmullRom suaviza demais nas curvas
+  // e faz os bots saírem da pista nas extremidades.
+  if (map.pathPoints && map.pathPoints.length >= 4) {
+    return map.pathPoints.map(([x, z]) => new THREE.Vector3(x, 0.5, z));
+  }
+
+  // Para pistas procedurais (sem pathPoints): gerar via CatmullRom
   let basePath = getTrackPath(map);
   if (!basePath || basePath.length < 2) {
     basePath = [];
@@ -117,6 +125,7 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
   const lapProgress = useRef(0);
   const waypointsRef = useRef<THREE.Vector3[]>([]);
   const trackSplineRef = useRef<TrackSpline | null>(null);
+  const adaptiveWaypointRadius = useRef(0); // Calculado após generateWaypoints
   const spinTimer = useRef(0);
   const steeringValRef = useRef(0);
   const isDrifting = useRef(false);
@@ -192,6 +201,19 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     waypointsRef.current = generateWaypoints(map, Math.max(80, (map.pathPoints?.length ?? 0) * 2));
     trackSplineRef.current = new TrackSpline(map);
 
+    // Calcular raio adaptativo baseado no espaçamento real entre waypoints
+    // Para pistas com pathPoints (ex: oval ~30m/waypoint), o raio fixo de 4-8m
+    // é muito pequeno — os bots passam pelo waypoint sem capturar
+    if (waypointsRef.current.length >= 2) {
+      const wp0 = waypointsRef.current[0];
+      const wp1 = waypointsRef.current[1];
+      const spacing = wp0.distanceTo(wp1);
+      // Raio = 40% do espaçamento, mínimo de 4m, máximo de 20m
+      const adaptiveRadius = Math.min(20, Math.max(4, spacing * 0.4));
+      // Patch temporário: override settings.waypointRadius via mutable ref
+      adaptiveWaypointRadius.current = adaptiveRadius;
+    }
+
     if (waypointsRef.current.length > 0) {
       const startP = new THREE.Vector3(position[0], position[1], position[2]);
       let closest = 0;
@@ -236,6 +258,13 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
       return;
     }
 
+    // Ler posição atual do Rapier UMA VEZ por frame, antes do loop de física
+    // Isso garante que a IA navega com a posição real do frame atual
+    {
+      const t = body.translation();
+      _currentPos.current.set(t.x, t.y, t.z);
+    }
+
     // Fixed Timestep Accumulator
     // Clamp delta to 0.1s to prevent spiral of death during massive lag spikes
     accumulator.current += Math.min(delta, 0.1);
@@ -247,22 +276,17 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
       accumulator.current -= PHYSICS_TIMESTEP;
       const step = PHYSICS_TIMESTEP;
 
-      const pos = _currentPos.current; // Re-use vector, but we need to update it from somewhere?
-      // Ah, `pos` comes from body.translation(). But inside the loop, we are predicting future state?
-      // NO. Physics Loop updates `currentSpeed` and `currentRotation`.
-      // The Position integration happens via Rapier (External).
-      // Wait. if Rapier integrates position, we can't loop position-dependent logic perfectly without syncing position.
-      // However, `currentWaypointIndex` depends on position.
-      // If we assumed position updates only once per frame, `distToTarget` assumes old position.
-      // This is acceptable for AI navigation (it doesn't need sub-frame precision).
-      // We will read position ONCE per frame outside the loop.
+      const pos = _currentPos.current;
 
       // Logic Update:
       const waypoints = waypointsRef.current;
       if (waypoints.length > 0) {
-        // Waypoint switching
+        // Waypoint switching — usa raio adaptativo se calculado, senão usa o do preset
+        const effectiveRadius = adaptiveWaypointRadius.current > 0
+          ? adaptiveWaypointRadius.current
+          : settings.waypointRadius;
         const distToTarget = pos.distanceTo(waypoints[currentWaypointIndex.current]);
-        if (distToTarget < settings.waypointRadius) {
+        if (distToTarget < effectiveRadius) {
           currentWaypointIndex.current = (currentWaypointIndex.current + 1) % waypoints.length;
         }
 
@@ -309,10 +333,9 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     }
 
     // --- Render Frame Logic (Visuals & Raycasts) ---
-    // Read current physical position from Rapier for Rays/Visuals
+    // Posição já lida acima (antes do loop de física) — só relê para ter t.x/t.y/t.z
     const t = body.translation();
     if (!Number.isFinite(t.x)) { body.setLinvel({ x: 0, y: 0, z: 0 }, true); return; }
-    _currentPos.current.set(t.x, t.y, t.z);
 
     // Ground snapping via raycast (throttled)
     rayFrameCount.current++;

@@ -30,15 +30,11 @@ export interface MapConfig {
   // Novo sistema (opcional, para não quebrar)
   // Novo sistema (modular)
   trackSystem?: {
-    type: 'legacy' | 'spline-tiles' | 'spline' | 'tile-kit' | 'model'; // Expanded types
+    type: 'legacy' | 'spline-tiles' | 'spline' | 'model';
 
     // Para spline-tiles:
     seed?: string;
     tiles?: PlacedTile[]; // Tiles pré-gerados (opcional)
-
-    // Para tile-kit:
-    kit?: 'racing-kit' | 'future-kit';
-    layout?: 'circuit' | 'oval' | 'figure8' | 'custom';
 
     // Para model:
     modelUrl?: string;
@@ -246,79 +242,80 @@ export const MAPS: MapConfig[] = [
     ],
   },
   {
-    id: "turbo-speedway",
-    name: "Turbo Speedway",
-    description: "A professional circuit with sweeping curves and chicanes",
-    difficulty: "medium",
-    trackColor: "#3a3a3a",
-    grassColor: "#3d7a1e",
+    id: "cartoon-race-track-oval",
+    name: "Cartoon Oval",
+    description: "A vibrant cartoon-style oval circuit",
+    difficulty: "easy",
+    trackColor: "#555555",
+    grassColor: "#4a7c23",
     barrierColors: ["#ff2222", "#ffffff"],
     skyPreset: "day",
-    trackType: "circuit",
-    trackWidth: 20,
-    trackLength: 400,
-    curveRadius: 120,
+    trackType: "oval",
+    trackWidth: 25,
+    trackLength: 1214, // Perímetro real da oval (rx=245m, rz=133m)
+    curveRadius: 133,
     decorationType: "forest",
-    thumbnail: "red",
-    // Grid-based circuit (TILE_SIZE=20). Path follows center of road tiles.
-    // Circuit: start(+X) → turn1(BR) → straight(-Z) → turn2(TR) →
-    //          straight(-X) → turn3(TL) → straight(+Z) → turn4(BL) → start
-    // pathPoints: [
-    //   // Start/finish straight (+X direction, z center = -10)
-    //   [0, -10],
-    //   [20, -10],
-    //   [40, -10],
-    //   [60, -10],
-    //   [80, -10],
-    //   // Turn 1 — bottom-right (large 2x2 corner)
-    //   [100, -15],
-    //   [115, -30],
-    //   [120, -45],
-    //   // Right straight (-Z direction, x center = 130)
-    //   [130, -70],
-    //   [130, -100],
-    //   [130, -120],
-    //   [130, -150],
-    //   [130, -170],
-    //   // Turn 2 — top-right (larger 3x3 corner)
-    //   [120, -190],
-    //   [100, -200],
-    //   [80, -200],
-    //   // Top straight (-X direction, z center = -190)
-    //   [50, -190],
-    //   [20, -190],
-    //   [0, -190],
-    //   [-20, -190],
-    //   // Turn 3 — top-left (larger 3x3 corner)
-    //   [-50, -195],
-    //   [-70, -185],
-    //   [-80, -170],
-    //   // Left straight (+Z direction, x center = -80)
-    //   [-80, -140],
-    //   [-80, -110],
-    //   [-80, -80],
-    //   [-80, -50],
-    //   // Turn 4 — bottom-left (large 2x2 corner)
-    //   [-75, -25],
-    //   [-60, -12],
-    //   [-40, -10],
-    //   [-20, -10],
-    // ],
-    startPositions: [
-      // New layout start (Underpass straight, gx=-3, gz=-2 area)
-      // Facing North (-Z).
-      // gx=-3 -> x center -50. gz=-2 -> z center -30.
-      // Spread karts slightly along Z (behind start) and X (lanes).
-      [-48, 1, -25], // Right lane, Front
-      [-52, 1, -25], // Left lane, Front
-      [-48, 1, -15], // Right lane, Back
-      [-52, 1, -15], // Left lane, Back
-      [-48, 1, -5],
-      [-52, 1, -5],
-      [-48, 1, 5],
-      [-52, 1, 5],
+    thumbnail: "green",
+    // Centro da pista: X=0, Z=-160.5m | oval rx=245m, rz=133m
+    // Gerado a partir dos nodes do GLB (1TARMAC_oval scale=0.0254, translation Z=-160.5)
+    pathPoints: [
+      [0, -27.5],
+      [38.3, -29.1],
+      [75.7, -34],
+      [111.2, -42],
+      [144, -52.9],
+      [173.2, -66.5],
+      [198.2, -82.3],
+      [218.3, -100.1],
+      [233, -119.4],
+      [242, -139.7],
+      [245, -160.5],
+      [242, -181.3],
+      [233, -201.6],
+      [218.3, -220.9],
+      [198.2, -238.7],
+      [173.2, -254.5],
+      [144, -268.1],
+      [111.2, -279],
+      [75.7, -287],
+      [38.3, -291.9],
+      [0, -293.5],
+      [-38.3, -291.9],
+      [-75.7, -287],
+      [-111.2, -279],
+      [-144, -268.1],
+      [-173.2, -254.5],
+      [-198.2, -238.7],
+      [-218.3, -220.9],
+      [-233, -201.6],
+      [-242, -181.3],
+      [-245, -160.5],
+      [-242, -139.7],
+      [-233, -119.4],
+      [-218.3, -100.1],
+      [-198.2, -82.3],
+      [-173.2, -66.5],
+      [-144, -52.9],
+      [-111.2, -42],
+      [-75.7, -34],
+      [-38.3, -29.1],
     ],
-    startRotation: Math.PI, // Facing North (-Z)
+    // Extraído dos nodes GRID_LEFT/RIGHT_01..04 do GLB
+    startPositions: [
+      [1.93, 0.5, -30.36],
+      [-2.06, 0.5, -22.87],
+      [-6.06, 0.5, -33.13],
+      [-10.06, 0.5, -25.63],
+      [-14.05, 0.5, -33.13],
+      [-18.05, 0.5, -25.63],
+      [-22.06, 0.5, -33.13],
+      [-26.06, 0.5, -25.63],
+    ],
+    startRotation: Math.PI / 2, // Facing +X (East), tangente da oval no ponto de largada
+    trackSystem: {
+      type: 'model',
+      modelUrl: '/assets/kart-map/cartoon-race-track-oval/cartoon-race-track-oval.glb',
+    },
   },
   {
     id: "rainbow-road-pro",

@@ -28,7 +28,7 @@ export interface RacerState {
 
 const MIN_CHECKPOINT_SPEED = 2.0;
 const MIN_DISTANCE_FOR_CHECKPOINT = 30; // meters
-const SYNC_INTERVAL = 100; // ms — sync ref→state for React re-renders
+const SYNC_INTERVAL = 50; // ms — sync ref→state for React re-renders (20Hz para ranking mais responsivo)
 
 // ── Hook ────────────────────────────────────────────────────────────
 
@@ -51,6 +51,9 @@ export function useRaceState({
 }) {
   const racerStatesRef = useRef<Map<string, RacerState>>(new Map());
   const [racerStates, setRacerStates] = useState<Map<string, RacerState>>(new Map());
+  // Hysteresis: posição só muda no ranking se confirmar em 2 ticks consecutivos.
+  // Evita flicker de "4º→1º" causado por lapProgress jitter ao ultrapassar outro kart.
+  const pendingPositionRef = useRef<Map<string, number>>(new Map());
 
   // Initialize racer states when players change
   useEffect(() => {
@@ -75,15 +78,18 @@ export function useRaceState({
         });
       });
       racerStatesRef.current = initialStates;
+      pendingPositionRef.current = new Map();
       setRacerStates(initialStates);
     }
   }, [players, screen, selectedMap.startPositions, localPlayerId]);
 
-  // Periodic sync: recalculate positions + copy ref → React state (10Hz)
+  // Periodic sync: recalculate positions + copy ref → React state (20Hz)
   useEffect(() => {
     const interval = window.setInterval(() => {
       const states = racerStatesRef.current;
-      // Recalculate positions (sort) at 10Hz instead of every useFrame call
+      const pending = pendingPositionRef.current;
+
+      // Recalculate positions via sort
       const sorted = Array.from(states.values()).sort((a, b) => {
         if (a.finished && b.finished) {
           return (a.finishTime ?? Infinity) - (b.finishTime ?? Infinity);
@@ -92,10 +98,27 @@ export function useRaceState({
         if (b.finished) return 1;
         return b.totalProgress - a.totalProgress;
       });
+
+      // Hysteresis: só aplica nova posição se coincidir com o pending do tick anterior.
+      // Isso evita flicker de 1 tick (ex: 1º→4º→1º) quando lapProgress oscila
+      // momentaneamente por colisão lateral entre karts.
       sorted.forEach((racer, idx) => {
+        const newPos = idx + 1;
         const s = states.get(racer.id);
-        if (s) s.position = idx + 1;
+        if (!s) return;
+
+        const lastPending = pending.get(racer.id);
+        if (lastPending === newPos) {
+          // Confirmado em 2 ticks consecutivos — aplica e limpa pending
+          s.position = newPos;
+          pending.delete(racer.id);
+        } else if (newPos !== s.position) {
+          // Posição mudou em relação à atual — guarda como pending para confirmar
+          pending.set(racer.id, newPos);
+        }
+        // Se newPos === s.position (sem mudança), não precisa fazer nada
       });
+
       setRacerStates(new Map(states));
     }, SYNC_INTERVAL);
     return () => window.clearInterval(interval);
@@ -110,12 +133,21 @@ export function useRaceState({
       speed: number,
       lapProgress: number
     ) => {
-      // Once the local player has finished, freeze ALL race results.
-      if (gameStateRef.current === "finished") return;
-
       const states = racerStatesRef.current;
       const currentState = states.get(id);
       if (!currentState || currentState.finished) return;
+
+      // Quando o jogo terminou (jogador local cruzou a linha), só atualiza
+      // posição/progresso dos outros corredores para ranking final correto —
+      // mas não deixa incrementar lap (evita mostrar 4/3 voltas).
+      if (gameStateRef.current === "finished") {
+        currentState.kartPosition = position;
+        currentState.kartRotation = rotation;
+        currentState.speed = speed;
+        currentState.lapProgress = lapProgress;
+        currentState.totalProgress = (currentState.lap - 1) + lapProgress;
+        return;
+      }
 
       // SECTOR LOGIC (Prevent Reverse Farming & False Laps)
       let { lap, checkpoints, distanceTraveled } = currentState;
@@ -153,9 +185,10 @@ export function useRaceState({
         }
       }
 
-      // Penalize Reverse
-      if (checkpoints === 2 && lapProgress < 0.5) checkpoints = 1;
-      if (checkpoints === 1 && lapProgress < 0.2) checkpoints = 0;
+      // Penalize Reverse [Fix 5.6]: threshold reduzido de 0.5→0.3 (evitava false-positive
+      // entre 50%-60% onde kart ainda pode estar avançando em direção ao CP2 em 60%)
+      if (checkpoints === 2 && lapProgress < 0.3) checkpoints = 1;
+      if (checkpoints === 1 && lapProgress < 0.1) checkpoints = 0;
 
       // FINISH DETECTION: check if racer completed all laps
       const MIN_DISTANCE_FOR_FINISH = 100 * totalLaps;
@@ -181,8 +214,10 @@ export function useRaceState({
       currentState.lap = displayLap;
       currentState.checkpoints = checkpoints;
       currentState.distanceTraveled = distanceTraveled;
-      // totalProgress uses actual newLap for correct ranking (finished racers rank higher)
-      currentState.totalProgress = (canFinish ? totalLaps : displayLap - 1) + lapProgress;
+      // [Fix 5.8] totalProgress: finished racers get totalLaps+1 (same as handleRemoteFinish)
+      // so the sort falls back to finishTime only — avoids remote finishers always ranking
+      // above local finisher because totalLaps+1 (remote) > totalLaps+lapProgress (local).
+      currentState.totalProgress = canFinish ? totalLaps + 1 : (displayLap - 1) + lapProgress;
       currentState.finished = canFinish;
       if (canFinish && !currentState.finishTime) {
         currentState.finishTime = raceTimeRef.current;

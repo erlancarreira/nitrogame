@@ -44,6 +44,14 @@ interface SimPlayer {
     inputs: PlayerInput[];
     lastProcessedFrame: number;
     lastInput?: any; // KartInputState
+    /** lapProgress (0-1) reportado pelo cliente via POS relay — servidor não tem spline */
+    lastKnownLapProgress: number;
+    /** Volta atual — inferida via cruzamento de linha de chegada (lapProgress hi→lo) */
+    lastKnownLap: number;
+    /** lapProgress da última atualização POS (para detectar cruzamento de volta) */
+    prevLapProgress: number;
+    /** Frames consecutivos sem input recebido — limita sticky input (anti-ghost kart) */
+    framesWithoutInput: number;
 }
 
 interface RoomSimulation {
@@ -63,6 +71,14 @@ const socketIdMap = new Map<string, string>();
 
 type RateBucket = { count: number; resetAt: number };
 const rateBuckets = new Map<string, RateBucket>();
+
+// Cleanup expirados a cada 5 minutos para evitar memory leak (sockets desconectados)
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, bucket] of rateBuckets) {
+        if (bucket.resetAt <= now) rateBuckets.delete(key);
+    }
+}, 5 * 60_000);
 
 const RATE = {
     lobby: { limit: 30, intervalMs: 10_000 },        // create/join/update/settings/start
@@ -99,7 +115,7 @@ function guard(socket: Socket, key: string, conf: { limit: number; intervalMs: n
 // Input Validation Constants
 const MAX_NAME_LENGTH = 20;
 const COLOR_REGEX = /^#[0-9a-fA-F]{3,8}$/;
-const VALID_MAP_IDS = ["green-valley", "sunset-circuit", "frost-peak", "neon-nights", "volcano-rush", "crystal-caves", "cyber-loop", "cartoon-race-track-oval"];
+const VALID_MAP_IDS = ["green-valley"];
 const VALID_LAPS = [1, 2, 3, 5, 10];
 const MAX_ROOM_CODE_ATTEMPTS = 50;
 
@@ -220,6 +236,10 @@ function ensureRoomSimulation(room: Room): RoomSimulation {
             physics,
             inputs: [],
             lastProcessedFrame: 0,
+            lastKnownLapProgress: 0,
+            lastKnownLap: 1,
+            prevLapProgress: 0,
+            framesWithoutInput: 0,
         });
     });
 
@@ -247,6 +267,80 @@ function decodePosHeader(buffer: Buffer): { x: number, y: number, z: number } | 
     }
 }
 
+// ---- TURN Credentials (Cloudflare + Metered.ca) ----
+
+const CF_TURN_KEY_ID    = process.env.CF_TURN_KEY_ID    || "";
+const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN || "";
+const METERED_API_KEY   = process.env.METERED_API_KEY   || "";
+const METERED_APP_NAME  = process.env.METERED_APP_NAME  || "";
+
+// Separate caches so each provider refreshes independently
+let cfCached: RTCIceServer[] | null = null;
+let cfCacheExpiry = 0;
+let meteredCached: RTCIceServer[] | null = null;
+let meteredCacheExpiry = 0;
+
+async function getCloudflareServers(): Promise<RTCIceServer[]> {
+    if (!CF_TURN_KEY_ID || !CF_TURN_API_TOKEN) return [];
+    const now = Date.now();
+    if (cfCached && now < cfCacheExpiry) return cfCached;
+    try {
+        const res = await fetch(
+            `https://rtc.live.cloudflare.com/v1/turn/keys/${CF_TURN_KEY_ID}/credentials/generate-ice-servers`,
+            {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${CF_TURN_API_TOKEN}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ ttl: 86400 }),
+            }
+        );
+        if (res.ok) {
+            const data = await res.json() as { iceServers: RTCIceServer[] };
+            cfCached = data.iceServers;
+            cfCacheExpiry = now + 12 * 3600 * 1000; // refresh at half-life of 24h TTL
+            console.log("[turn/cf] Credentials fetched successfully");
+            return cfCached;
+        }
+        console.warn("[turn/cf] API error:", res.status, await res.text());
+    } catch (err) {
+        console.warn("[turn/cf] Fetch failed:", err);
+    }
+    return [];
+}
+
+async function getMeteredServers(): Promise<RTCIceServer[]> {
+    if (!METERED_API_KEY || !METERED_APP_NAME) return [];
+    const now = Date.now();
+    if (meteredCached && now < meteredCacheExpiry) return meteredCached;
+    try {
+        const res = await fetch(
+            `https://${METERED_APP_NAME}.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`
+        );
+        if (res.ok) {
+            const data = await res.json() as RTCIceServer[];
+            meteredCached = data;
+            meteredCacheExpiry = now + 12 * 3600 * 1000;
+            console.log("[turn/metered] Credentials fetched successfully");
+            return meteredCached;
+        }
+        console.warn("[turn/metered] API error:", res.status, await res.text());
+    } catch (err) {
+        console.warn("[turn/metered] Fetch failed:", err);
+    }
+    return [];
+}
+
+/** Returns merged ICE servers from all configured providers. Falls back to Google STUN only. */
+async function getIceServers(): Promise<RTCIceServer[]> {
+    const [cf, metered] = await Promise.all([getCloudflareServers(), getMeteredServers()]);
+    const combined = [...cf, ...metered];
+    if (combined.length > 0) return combined;
+    // Fallback: STUN only (no TURN relay available)
+    return [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+    ];
+}
+
 // ---- Initialization Function ----
 
 export function setupSocketIO(io: Server) {
@@ -271,7 +365,12 @@ export function setupSocketIO(io: Server) {
                     const { physics } = simPlayer;
                     const inputs = simPlayer.inputs;
 
+                    // [Fix 1.10] Max frames sticky input — evita "kart fantasma" se cliente desconectar
+                    // sem disparar o evento disconnect (ex: crash, timeout de rede)
+                    const MAX_STICKY_FRAMES = 180; // 3s a 60Hz → kart para de se mover
+
                     if (inputs.length > 0) {
+                        simPlayer.framesWithoutInput = 0; // Reset ao receber inputs
                         inputs.sort((a, b) => a.frame - b.frame);
                         for (const input of inputs) {
                             if (input.frame <= simPlayer.lastProcessedFrame) continue;
@@ -288,9 +387,14 @@ export function setupSocketIO(io: Server) {
                         }
                         simPlayer.inputs = [];
                     } else {
+                        simPlayer.framesWithoutInput += 1;
                         // No new input? Use last known input (Input Persistence)
                         // This prevents "braking" simulation if a packet arrives 1ms late or if client is 30Hz
-                        const stickyInput = simPlayer.lastInput || normalizeInput({ throttle: 0, steer: 0, brake: false, drift: false, useItem: false });
+                        // After MAX_STICKY_FRAMES, switch to neutral (brake) to stop the ghost kart
+                        const zeroInput = normalizeInput({ throttle: 0, steer: 0, brake: false, drift: false, useItem: false });
+                        const stickyInput = (simPlayer.framesWithoutInput <= MAX_STICKY_FRAMES && simPlayer.lastInput)
+                            ? simPlayer.lastInput
+                            : zeroInput;
                         updateKartPhysics(physics, stickyInput, SIM_DT_MS / 1000);
                     }
                 }
@@ -299,6 +403,9 @@ export function setupSocketIO(io: Server) {
                 if (now - sim.lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) {
                     const playersState: Record<string, PlayerState> = {};
                     for (const [socketId, simPlayer] of sim.players) {
+                        // [Fix 3.6/3.7] Inject lap progress from client POS relay — server has no spline
+                        simPlayer.physics.lapProgress = simPlayer.lastKnownLapProgress;
+                        simPlayer.physics.lap = simPlayer.lastKnownLap;
                         playersState[socketId] = stateToPlayerState(socketId, simPlayer.physics, sim.frame, now);
                     }
                     const snapshot: GameSnapshot = {
@@ -322,6 +429,17 @@ export function setupSocketIO(io: Server) {
 
     io.on("connection", (socket: Socket) => {
         console.log(`[connect] ${socket.id}`);
+
+        // --- ICE SERVERS (Cloudflare TURN) ---
+        socket.on("get-ice-servers", async (ack: Function) => {
+            if (!guard(socket, "get-ice-servers", RATE.lobby)) return ack?.([]);
+            try {
+                const servers = await getIceServers();
+                ack(servers);
+            } catch {
+                ack([]);
+            }
+        });
 
         // --- CLOCK SYNC ---
         socket.on("clock-sync-ping", (clientSendTime: number, ack: Function) => {
@@ -584,6 +702,21 @@ export function setupSocketIO(io: Server) {
             const room = getRoomBySocket(socket.id);
             if (!room) return;
 
+            // [Fix 3.6/3.7] Helper: update simPlayer with lapProgress from POS, inferring lap via crossing
+            const updateSimProgress = (socketId: string, lapProgress: number) => {
+                const sim = roomSims.get(room.code);
+                if (!sim) return;
+                const simPlayer = sim.players.get(socketId);
+                if (!simPlayer) return;
+                const totalLaps = room.gameConfig?.laps ?? room.settings.laps ?? 3;
+                // Detect finish-line crossing: progress goes from high (>0.8) to low (<0.2)
+                if (simPlayer.prevLapProgress > 0.8 && lapProgress < 0.2 && simPlayer.lastKnownLap < totalLaps) {
+                    simPlayer.lastKnownLap += 1;
+                }
+                simPlayer.prevLapProgress = lapProgress;
+                simPlayer.lastKnownLapProgress = lapProgress;
+            };
+
             // 1. If Binary (Buffer/ArrayBuffer)
             if (Buffer.isBuffer(msg) || ((msg as any).buffer instanceof ArrayBuffer)) {
                 // Decode just position for culling
@@ -592,6 +725,22 @@ export function setupSocketIO(io: Server) {
                 if (pos) {
                     const sender = room.players.find(p => p.socketId === socket.id);
                     if (sender) sender.lastPos = pos;
+
+                    // Extract lapProgress from binary (offset = 1+1+idLen + 12 bytes pos = 14+idLen)
+                    // Layout: [0x50][idLen][id...][x:4][y:4][z:4][rot:4][speed:4][lapProgress:4]...
+                    try {
+                        const buf = msg as Buffer;
+                        if (buf.length >= 6) {
+                            const idLen = buf[1];
+                            const lpOffset = 2 + idLen + 12 + 4 + 4; // skip header+id+pos+rot+speed
+                            if (lpOffset + 4 <= buf.length) {
+                                const lapProgress = buf.readFloatLE(lpOffset);
+                                if (lapProgress >= 0 && lapProgress <= 1) {
+                                    updateSimProgress(socket.id, lapProgress);
+                                }
+                            }
+                        }
+                    } catch (_) { /* ignore malformed */ }
 
                     // Relay to peers
                     for (const p of room.players) {
@@ -623,6 +772,10 @@ export function setupSocketIO(io: Server) {
                     const sender = room.players.find(player => player.socketId === socket.id);
                     if (sender) sender.lastPos = { x: p[0], y: p[1], z: p[2] };
                 }
+                // [Fix 3.6/3.7] JSON POS also carries l (lapProgress)
+                if (typeof msg.l === 'number' && msg.l >= 0 && msg.l <= 1) {
+                    updateSimProgress(socket.id, msg.l);
+                }
                 socket.to(room.code).volatile.emit("pos-relay", msg);
             }
         });
@@ -631,9 +784,25 @@ export function setupSocketIO(io: Server) {
         socket.on("reliable-msg", (data: { code: string; msg: Record<string, unknown> }) => {
             if (!guard(socket, "reliable-msg", RATE.signaling)) return;
             const room = getRoomBySocket(socket.id);
-            if (room && room.code === data.code) {
-                socket.to(room.code).emit("reliable-msg", data.msg);
+            if (!room || room.code !== data.code) return;
+
+            // [Fix 6.8] Validate ITEM_HIT authority:
+            // Only the player being targeted (self-report) OR the host may send ITEM_HIT.
+            // We overwrite senderId server-side so clients can trust it.
+            if (data.msg.type === "ITEM_HIT") {
+                const sender = room.players.find(p => p.id === socket.id);
+                if (!sender) return; // not in room
+
+                const targetId = data.msg.targetId as string | undefined;
+                const isHost = room.hostId === socket.id;
+                // A non-host may only report a hit ON THEMSELVES (they are the victim)
+                if (!isHost && targetId !== socket.id) return;
+
+                // Stamp the authoritative senderId so clients can verify origin
+                data.msg.senderId = socket.id;
             }
+
+            socket.to(room.code).emit("reliable-msg", data.msg);
         });
 
         // --- DISCONNECT ---

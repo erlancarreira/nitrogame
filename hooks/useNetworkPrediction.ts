@@ -51,31 +51,43 @@ function smoothTowards(
       a.position[2] + (b.position[2] - a.position[2]) * factor,
     ],
 
-    rotation: smoothAngle(a.rotation, b.rotation, factor),
+    // Durante spinOut/oilSlip, não interpolar rotação do servidor (causaria tremor)
+    rotation: (a.isSpinningOut || a.isOilSlipping)
+      ? a.rotation
+      : smoothAngle(a.rotation, b.rotation, factor),
 
-    velocity: bothIdle ? [0, 0, 0] : [
+    velocity: (a.isSpinningOut) ? [...a.velocity] : bothIdle ? [0, 0, 0] : [
       a.velocity[0] + (b.velocity[0] - a.velocity[0]) * factor,
       0, // Y velocity from Rapier
       a.velocity[2] + (b.velocity[2] - a.velocity[2]) * factor,
     ],
 
-    speed: bothIdle ? 0 : a.speed + (b.speed - a.speed) * factor,
+    speed: (a.isSpinningOut) ? a.speed : bothIdle ? 0 : a.speed + (b.speed - a.speed) * factor,
     lap: b.lap,
     lapProgress: b.lapProgress,
 
-    // flags sincronizam direto (não interpolar boolean)
-    isDrifting: b.isDrifting,
-    driftTime: b.driftTime,
-    driftDirection: b.driftDirection,
+    // ── Drift: b já carrega estado local (serverPhysicsState preserva drift) ──
+    // Usar b diretamente — é o estado local injetado no serverPhysicsState/replayedState
+    isDrifting:      b.isDrifting,
+    driftTime:       b.driftTime,
+    driftDirection:  b.driftDirection,
     driftSlideAngle: b.driftSlideAngle,
-    boostStrength: b.boostStrength,
+
+    // ── Invencibilidade: b carrega local (injetado no serverPhysicsState) ──
     isInvincible: b.isInvincible,
-    isOilSlipping: b.isOilSlipping,
-    oilSlipTime: b.oilSlipTime,
-    isSpinningOut: b.isSpinningOut,
-    spinOutTime: b.spinOutTime,
-    currentSteer: a.currentSteer + (b.currentSteer - a.currentSteer) * factor,
-    boostTimeRemaining: b.boostTimeRemaining,
+
+    // ── Efeitos client-side puros (servidor não simula): sempre de 'a' ──
+    isOilSlipping: a.isOilSlipping,
+    oilSlipTime:   a.oilSlipTime,
+    isSpinningOut: a.isSpinningOut,
+    spinOutTime:   a.spinOutTime,
+
+    // ── Boost: b carrega local se ativo, servidor se expirado ──
+    boostStrength:      b.boostTimeRemaining > 0 ? b.boostStrength      : a.boostTimeRemaining > 0 ? a.boostStrength      : 1,
+    boostTimeRemaining: b.boostTimeRemaining > 0 ? b.boostTimeRemaining : a.boostTimeRemaining > 0 ? a.boostTimeRemaining : 0,
+
+    // ── Steering: b carrega local (injetado), sem interpolação extra ──
+    currentSteer: b.currentSteer,
   };
 }
 
@@ -198,7 +210,7 @@ export function useNetworkPrediction(
 
   const processInput = useCallback(
     (inputData: Omit<PlayerInput, "frame" | "timestamp">) => {
-      // Rate Limit Input Generation to Network Tick (30Hz)
+      // Rate Limit Input Generation to 60Hz tick
       // Use performance.now() for local throttling (monotonic)
       const now = performance.now();
       const timeSinceLastInput = now - lastInputSendTime.current;
@@ -219,8 +231,10 @@ export function useNetworkPrediction(
         timestamp: netClock.now,
       };
 
-      // Prediction local - FORCE FIXED TIMESTEP to match Server
-      const predictedState = applyInput(renderState.current, input, FRAME_DT);
+      // Usar dt real (tempo desde último tick) para avançar física corretamente
+      // em qualquer frame rate. Clampado em 100ms para evitar spikes de lag.
+      const realDt = Math.min(timeSinceLastInput / 1000, 0.1);
+      const predictedState = applyInput(renderState.current, input, realDt);
       renderState.current = predictedState;
 
       // Guarda no buffer
@@ -284,25 +298,42 @@ export function useNetworkPrediction(
       const myState = snapshot.players[kartId];
       if (!myState) return;
 
+      // Capturar estado local para preservar campos client-side que o servidor não transmite
+      const local = renderState.current;
+      const localBoostActive = local.boostTimeRemaining > 0;
+
       const serverPhysicsState: KartPhysicsState = {
-        position: [...myState.position], // Full Server Position
+        // ── Campos autoritativos do servidor ──────────────────────────────
+        position: [...myState.position],
         rotation: myState.rotation,
         speed: myState.speed,
         velocity: [...myState.velocity],
         lapProgress: myState.lapProgress,
         lap: myState.lap,
-        isDrifting: false,
-        driftTime: 0,
-        driftDirection: 0,
-        driftSlideAngle: 0,
-        boostStrength: 1,
-        isInvincible: false,
-        isOilSlipping: false,
-        oilSlipTime: 0,
-        isSpinningOut: false,
-        spinOutTime: 0,
-        currentSteer: 0,
-        boostTimeRemaining: 0,
+
+        // ── Drift: servidor simula mas NÃO envia no snapshot → preservar local ──
+        // Sem isso, a cada snapshot o driftSlideAngle vai a zero (slide para de repente)
+        // e o driftTime reseta (mini-turbo nunca acumula)
+        isDrifting:     local.isDrifting,
+        driftTime:      local.driftTime,
+        driftDirection: local.driftDirection,
+        driftSlideAngle: local.driftSlideAngle,
+
+        // ── Boost (item/drift): client-side, preservar enquanto timer ativo ──
+        boostStrength:      localBoostActive ? local.boostStrength      : 1,
+        boostTimeRemaining: localBoostActive ? local.boostTimeRemaining : 0,
+
+        // ── Invencibilidade (star power): client-side ──
+        isInvincible: local.isInvincible,
+
+        // ── SpinOut / OilSlip: client-side ──
+        isSpinningOut: local.isSpinningOut,
+        spinOutTime:   local.isSpinningOut ? local.spinOutTime : 0,
+        isOilSlipping: local.isOilSlipping,
+        oilSlipTime:   local.isOilSlipping ? local.oilSlipTime : 0,
+
+        // ── Steering: preservar local para evitar jitter no volante ──
+        currentSteer: local.currentSteer,
       };
 
       if (inputBuffer.current.pending.length === 0) {

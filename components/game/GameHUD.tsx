@@ -181,7 +181,7 @@ export const GameHUD = React.memo(function GameHUD({
       <div className="absolute top-14 left-1 md:top-4 md:left-4 z-0 md:z-10 bg-black/40 backdrop-blur-sm rounded-lg md:rounded-xl p-1.5 md:p-3 border border-white/10 w-20 md:w-48 origin-top-left transition-all" style={{ marginTop: "env(safe-area-inset-top, 0px)", marginLeft: "env(safe-area-inset-left, 0px)" }}>
         <div className="text-[8px] md:text-xs font-bold text-white/40 mb-0.5 md:mb-2 uppercase tracking-wider">{t.leaderboard}</div>
         <div className="space-y-0.5 md:space-y-1">
-          {sortedRacers.slice(0, 4).map((racer, index) => (
+          {sortedRacers.map((racer, index) => (
             <div
               key={racer.id}
               className={`flex items-center gap-1 md:gap-2 px-1 md:px-2 py-0.5 md:py-1 rounded-md transition-colors ${racer.isPlayer ? "bg-primary/30 border border-primary/20" : "bg-white/5"
@@ -302,42 +302,39 @@ export const GameHUD = React.memo(function GameHUD({
             </div>
           </div>
 
-          {/* Speedometer */}
-          <div className={`bg-black/60 backdrop-blur-xl rounded-full w-32 h-32 border-4 flex flex-col items-center justify-center shadow-2xl relative overflow-hidden transition-colors duration-200 ${speed > 45 ? "border-orange-500 shadow-orange-500/50" : "border-white/5"}`}>
-            <div className="absolute inset-0 bg-linear-to-t from-primary/20 to-transparent opacity-50" />
-            <div className={`relative z-10 flex flex-col items-center transition-colors duration-200 ${speed > 45 ? "text-orange-400" : "text-white"}`}>
-              <span className={`text-5xl font-black italic tracking-tighter ${speed > 45 ? "animate-pulse" : ""}`}>
-                {Math.round(speed || 0)}
-              </span>
-              <span className="text-xs font-bold text-primary uppercase tracking-widest mt-1">
-                KM/H
-              </span>
-              <div className="mt-2 text-white/40 text-xs font-bold uppercase tracking-widest flex items-center gap-1">
-                GEAR <span className="text-2xl text-white font-black italic">{
-                  (speed || 0) > 160 ? 6 :
-                    (speed || 0) > 125 ? 5 :
-                      (speed || 0) > 90 ? 4 :
-                        (speed || 0) > 60 ? 3 :
-                          (speed || 0) > 30 ? 2 : 1
-                }</span>
+          {/* Speedometer — max base 40, boost ultrapassa (mushroom → 80, drift tier3 → 72) */}
+          {(() => {
+            const spd = Math.round(speed || 0);
+            const isBoosting = spd > 40;
+            return (
+              <div className={`bg-black/60 backdrop-blur-xl rounded-full w-32 h-32 border-4 flex flex-col items-center justify-center shadow-2xl relative overflow-hidden transition-colors duration-200 ${isBoosting ? "border-orange-500 shadow-orange-500/50" : "border-white/5"}`}>
+                <div className="absolute inset-0 bg-linear-to-t from-primary/20 to-transparent opacity-50" />
+                <div className={`relative z-10 flex flex-col items-center transition-colors duration-200 ${isBoosting ? "text-orange-400" : "text-white"}`}>
+                  <span className={`text-5xl font-black italic tracking-tighter ${isBoosting ? "animate-pulse" : ""}`}>
+                    {spd}
+                  </span>
+                  <span className="text-xs font-bold text-primary uppercase tracking-widest mt-1">
+                    KM/H
+                  </span>
+                </div>
+                {/* Progress Ring — cheio em 40, excede com boost (clamp em 80) */}
+                <svg className="absolute inset-0 w-full h-full -rotate-90 p-1">
+                  <circle
+                    cx="50%" cy="50%" r="45%"
+                    fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="4"
+                  />
+                  <circle
+                    cx="50%" cy="50%" r="45%"
+                    fill="none" stroke="currentColor" strokeWidth="4"
+                    className={`transition-all duration-300 ${isBoosting ? "text-orange-500 drop-shadow-[0_0_10px_rgba(249,115,22,0.8)]" : "text-primary"}`}
+                    strokeDasharray="283"
+                    strokeDashoffset={283 - (Math.min(spd, 80) / 80) * 283}
+                    strokeLinecap="round"
+                  />
+                </svg>
               </div>
-            </div>
-            {/* Progress Ring */}
-            <svg className="absolute inset-0 w-full h-full -rotate-90 p-1">
-              <circle
-                cx="50%" cy="50%" r="45%"
-                fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="4"
-              />
-              <circle
-                cx="50%" cy="50%" r="45%"
-                fill="none" stroke="currentColor" strokeWidth="4"
-                className={`transition-all duration-300 ${speed > 45 ? "text-orange-500 drop-shadow-[0_0_10px_rgba(249,115,22,0.8)]" : "text-primary"}`}
-                strokeDasharray="283"
-                strokeDashoffset={283 - (Math.min((speed || 0), 100) / 100) * 283}
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -353,12 +350,17 @@ export const GameHUD = React.memo(function GameHUD({
             </div>
           )}
           {/* Speed (mobile) */}
-          <div className={`bg-black/50 backdrop-blur-sm rounded-full px-3 py-0.5 border transition-colors duration-200 ${speed > 45 ? "border-orange-500/50" : "border-white/10"}`}>
-            <span className={`text-lg font-black italic tracking-tighter ${speed > 45 ? "text-orange-400" : "text-white"}`}>
-              {Math.round(speed || 0)}
-            </span>
-            <span className="text-[8px] font-bold text-white/40 uppercase ml-1">km/h</span>
-          </div>
+          {(() => {
+            const spd = Math.round(speed || 0);
+            return (
+              <div className={`bg-black/50 backdrop-blur-sm rounded-full px-3 py-0.5 border transition-colors duration-200 ${spd > 40 ? "border-orange-500/50" : "border-white/10"}`}>
+                <span className={`text-lg font-black italic tracking-tighter ${spd > 40 ? "text-orange-400" : "text-white"}`}>
+                  {spd}
+                </span>
+                <span className="text-[8px] font-bold text-white/40 uppercase ml-1">km/h</span>
+              </div>
+            );
+          })()}
         </div>
       )}
 

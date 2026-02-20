@@ -244,6 +244,9 @@ export function updateKartPhysics(
     if (state.boostTimeRemaining <= 0) {
       state.boostTimeRemaining = 0;
       state.boostStrength = 1;
+      // [Fix 3.5 extension] Star power invincibility ends with the boost timer
+      // Without this, isInvincible stays true permanently after star power expires
+      if (state.isInvincible) state.isInvincible = false;
     }
   }
 

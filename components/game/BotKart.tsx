@@ -23,8 +23,9 @@ const SNAP_THRESHOLD = 0.5;
 const HEIGHT_DEADBAND = 0.05;
 const GRAVITY = 9.8;
 const SPIN_SPEED = 15;
-const SPIN_DURATION = 2.0;
-const MAX_VERTICAL_SPEED = 30;
+// [Fix 4.9] Align bot spin duration with human SPIN_OUT_DURATION (kart-physics-core.ts:32)
+const SPIN_DURATION = 1.2;
+const MAX_VERTICAL_SPEED = 15;
 const VELOCITY_CLAMP_FACTOR = 1.2;
 
 const DIFFICULTY_MULTIPLIERS = {
@@ -127,6 +128,9 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
   const trackSplineRef = useRef<TrackSpline | null>(null);
   const adaptiveWaypointRadius = useRef(0); // Calculado após generateWaypoints
   const spinTimer = useRef(0);
+  const starPowerTimer = useRef(0); // [Fix 4.7] Invencibilidade durante star power
+  const boostTimer = useRef(0);     // [Fix 4.6] Boost duration timer (seconds remaining)
+  const boostStrength = useRef(1);  // [Fix 4.6] Current boost multiplier for max speed
   const steeringValRef = useRef(0);
   const isDrifting = useRef(false);
   const slipRatio = useRef(0);
@@ -142,6 +146,7 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
   const _currentPos = useRef(new THREE.Vector3());
   const lastGroundSample = useRef(0);
   const prevSetSpeed = useRef(0);
+  const maxLapProgress = useRef(0); // Monotonic guard — lapProgress nunca regride
 
   const preset = useMemo<KartPhysicsConfig>(() => {
     if (!physicsPreset) return PRESET_STANDARD;
@@ -175,21 +180,29 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
       return { x: v.x, y: v.y, z: v.z };
     },
     getGroup: () => groupRef.current,
-    applyBoost: (strength = 1.5) => {
-      currentSpeed.current *= strength;
+    applyBoost: (strength = 1.5, duration = 2) => {
+      // [Fix 4.6] Apply boost with proper timer — mirrors coreApplyBoost in kart-physics-core.ts
+      boostStrength.current = strength;
+      boostTimer.current = duration;
+      currentSpeed.current = Math.min(currentSpeed.current * strength, settings.maxSpeed * strength);
     },
     applyStarPower: (duration = 8) => {
-      // Bots get a speed boost during star power
+      // [Fix 4.7] Bots get speed boost + invincibility during star power
       currentSpeed.current = settings.maxSpeed;
+      starPowerTimer.current = duration;
     },
+    getIsInvincible: () => starPowerTimer.current > 0,
     applyOilSlip: (duration = 2.5) => {
-      // Oil causes a brief spin-out for bots
+      // [Fix 4.7] Oil causes spin-out only if not invincible (star power)
+      if (starPowerTimer.current > 0) return;
       if (spinTimer.current <= 0) {
         spinTimer.current = duration;
         currentSpeed.current *= 0.3;
       }
     },
     spinOut: () => {
+      // [Fix 4.7] Shell/banana spin-out blocked by star power invincibility
+      if (starPowerTimer.current > 0) return;
       if (spinTimer.current <= 0) {
         spinTimer.current = SPIN_DURATION;
         currentSpeed.current = 0;
@@ -308,6 +321,21 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
         const maxTurnPerFrame = settings.turnSpeed * step;
         steeringValRef.current = maxTurnPerFrame > 0 ? -(turnAmount / maxTurnPerFrame) : 0;
 
+        // [Fix 4.7] Decrement star power timer each frame
+        if (starPowerTimer.current > 0) {
+          starPowerTimer.current -= step;
+          if (starPowerTimer.current < 0) starPowerTimer.current = 0;
+        }
+
+        // [Fix 4.6] Decrement boost timer — reset strength when expired
+        if (boostTimer.current > 0) {
+          boostTimer.current -= step;
+          if (boostTimer.current <= 0) {
+            boostTimer.current = 0;
+            boostStrength.current = 1;
+          }
+        }
+
         if (spinTimer.current > 0) {
           currentRotation.current += SPIN_SPEED * step;
           spinTimer.current -= step;
@@ -315,7 +343,9 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
           steeringValRef.current = 0;
         } else {
           currentRotation.current += turnAmount;
-          if (currentSpeed.current < settings.maxSpeed) {
+          // [Fix 4.6] Use boostStrength for max speed cap during active boost
+          const effectiveMaxSpeed = settings.maxSpeed * boostStrength.current;
+          if (currentSpeed.current < effectiveMaxSpeed) {
             currentSpeed.current += settings.acceleration * step;
           }
           if (Math.abs(currentSpeed.current) > 0) {
@@ -351,27 +381,51 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
       lastGroundSample.current = nowMs;
     }
 
-    let verticalVel = body.linvel().y;
-    // We use `step = delta` roughly for vertical integration/damping or use PHYSICS_TIMESTEP?
-    // Vertical velocity is set directly.
-    // Let's use `delta` for the damping purely visual/frame based.
-    const dampStep = Math.min(delta, 0.1);
+    // Velocidade vertical: ler do Rapier mas ignorar impulsos positivos espúrios
+    // (colisões laterais com paredes/rampas, kart-kart e sensores de item
+    //  podem injetar vy positivo que faz o bot voar)
+    const rapierLinvel = body.linvel();
+    const rapierVy = rapierLinvel.y;
+
+    let verticalVel: number;
 
     if (cachedGroundY.current !== null) {
       const targetY = cachedGroundY.current + HOVER_HEIGHT;
       const diff = targetY - t.y;
 
-      if (diff > SNAP_THRESHOLD) {
+      // Snap imediato: bot muito abaixo do chão OU em spinOut/oilSlip
+      // (velocidade=0 durante spin — sem snap, o spring fraco deixa o bot flutuar)
+      // Snap de emergência: bot voou muito acima (colisão kart-kart) — trazer de volta
+      if (diff > SNAP_THRESHOLD || spinTimer.current > 0 || diff < -3.0) {
         body.setTranslation({ x: t.x, y: targetY, z: t.z }, true);
         verticalVel = 0;
-      } else if (Math.abs(diff) > HEIGHT_DEADBAND) {
-        verticalVel = diff * SPRING_STIFFNESS * dampStep; // Using frame delta for spring
+      } else if (diff < -0.02) {
+        // Bot acima do alvo: aplicar gravidade para descer (não usar vy do Rapier
+        // que pode ser positivo por colisão)
+        verticalVel = Math.min(rapierVy, -GRAVITY * PHYSICS_TIMESTEP * 4);
+      } else if (diff > HEIGHT_DEADBAND) {
+        // Bot ligeiramente abaixo: spring proporcional à diferença, usando timestep fixo
+        verticalVel = diff * SPRING_STIFFNESS;
       } else {
+        // Dentro da deadband: zerar velocidade vertical para parar oscilação
         verticalVel = 0;
       }
-      if (Math.abs(verticalVel) < 2.0) verticalVel *= 0.8;
+
+      // Anular impulsos de colisão para cima quando o bot está perto do chão.
+      // diff < 3.0: cobre colisões kart-kart mesmo em terreno irregular.
+      // rapierVy > 1.5: threshold baixo para pegar até colisões rasas entre bots.
+      if (rapierVy > 1.5 && diff < 3.0) {
+        verticalVel = Math.min(0, verticalVel);
+      }
     } else {
-      verticalVel -= GRAVITY * dampStep; // Gravity per frame time
+      // Sem chão detectado: gravidade real.
+      // Se estiver em spin (cachedGroundY expirou por throttle), não deixar vy positivo
+      // — evita flutuar no ar durante spinOut/oilSlip quando o raycast não achou chão.
+      if (spinTimer.current > 0) {
+        verticalVel = Math.min(0, rapierVy);
+      } else {
+        verticalVel = rapierVy - GRAVITY * Math.min(delta, 0.1);
+      }
     }
 
     verticalVel = Math.max(Math.min(verticalVel, MAX_VERTICAL_SPEED), -MAX_VERTICAL_SPEED);
@@ -385,7 +439,8 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     let vz = _forward.current.z * currentSpeed.current;
 
     // Wall/kart collision: compare against LAST FRAME's set speed
-    const currentV = body.linvel();
+    // (rapierLinvel já lido acima — reutilizar para evitar segunda chamada WASM)
+    const currentV = rapierLinvel;
     const rapierSqXZ = currentV.x * currentV.x + currentV.z * currentV.z;
     const lastSet = prevSetSpeed.current;
 
@@ -410,7 +465,8 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     }
 
     prevSetSpeed.current = Math.sqrt(vx * vx + vz * vz);
-    const safeVel = clampLinvel({ x: vx, y: verticalVel, z: vz }, settings.maxSpeed * VELOCITY_CLAMP_FACTOR);
+    // [Fix 4.6] Clamp respects active boost strength so boosted bots aren't capped prematurely
+    const safeVel = clampLinvel({ x: vx, y: verticalVel, z: vz }, settings.maxSpeed * boostStrength.current * VELOCITY_CLAMP_FACTOR);
     body.setLinvel(safeVel, true);
 
     slipRatio.current = isDrifting.current
@@ -424,7 +480,36 @@ export const BotKart = forwardRef<KartRef, BotKartProps>(function BotKart({
     if (onPositionUpdate && elapsed - lastUpdateTime.current >= POSITION_UPDATE_INTERVAL) {
       lastUpdateTime.current = elapsed;
       if (trackSplineRef.current) {
-        lapProgress.current = trackSplineRef.current.project(t.x, t.z, lapProgress.current);
+        const newProgress = trackSplineRef.current.project(t.x, t.z, lapProgress.current);
+        // Proteção monotônica: não permite regressão espúria pequena (colisão lateral).
+        // Cruzamento de volta legítimo (0.98→0.02) tem circFwd > 0.3 → aceito normalmente.
+        // Jitter grande do spline (circularDelta ≥ 0.5) → descartado.
+        const rawDelta = Math.abs(newProgress - lapProgress.current);
+        const circularDelta = Math.min(rawDelta, 1 - rawDelta);
+        if (circularDelta >= 0.5) {
+          // Jitter extremo — descarta
+        } else {
+          const fwd = newProgress - lapProgress.current;
+          const circFwd = fwd < 0 ? fwd + 1 : fwd;
+          if (circFwd > 0.3) {
+            // Cruzamento de volta — reset do máximo
+            maxLapProgress.current = newProgress;
+            lapProgress.current = newProgress;
+          } else if (newProgress >= lapProgress.current) {
+            // Avanço normal
+            if (newProgress > maxLapProgress.current) maxLapProgress.current = newProgress;
+            lapProgress.current = newProgress;
+          } else {
+            // Regressão — só aceita se for grande (reverso intencional)
+            const regression = lapProgress.current - newProgress;
+            if (regression < 0.05) {
+              lapProgress.current = maxLapProgress.current > newProgress ? maxLapProgress.current : newProgress;
+            } else {
+              maxLapProgress.current = newProgress;
+              lapProgress.current = newProgress;
+            }
+          }
+        }
       }
       onPositionUpdate(id, [t.x, t.y, t.z], currentRotation.current, currentSpeed.current, lapProgress.current);
     }

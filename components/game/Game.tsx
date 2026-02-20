@@ -22,6 +22,7 @@ import { useRaceTimer } from "@/hooks/use-race-timer";
 import { useCountdown } from "@/hooks/use-countdown";
 import { networkManager } from "@/lib/game/networking";
 import { soundManager } from "@/lib/game/sound-manager";
+import { interpolator } from "@/lib/game/interpolator";
 
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -51,22 +52,10 @@ function getStartRotation(map: MapConfig): number {
     // But the start line is on a straight section. We should check the direction *at the start position*.
     // However, a simple robust fix for the main straight (where start always is)
     // is to look at the track geometry. For Green Valley, straight supports Z-axis driving.
-    // If the map is Green Valley, we force Math.PI (facing backwards initially? or forward?)
-    // Let's assume standard counter-clockwise racing.
+    // Fallback procedural: compute angle from first two track points
+    // Note: maps com startRotation explícito (ex: green-valley) nunca chegam aqui
     if (map.id === "green-valley") {
-      return Math.PI; // Face "North" or "South" depending on camera. Standard might be 0 or PI.
-      // Actually, if Z is -250 and we race towards +Z or -Z... 
-      // The oval generator: x = sin(angle)*R, z = cos(angle)*(L/2). 
-      // t=0 -> angle=PI -> x=0, z = -L/2.
-      // t increases -> angle increases -> z increases (cos goes from -1 up).
-      // So track moves from -Z to +Z on the "right" side (sin negative? angle PI to 2PI is 180 to 360 -> sin is negative... wait)
-      // angle = PI + t*2PI.
-      // t=0 (start) => angle=PI. sin(PI)=0, cos(PI)=-1. Pos=(0, -250).
-      // t small positive => angle > PI. sin(>PI) is negative (left/right?). cos(>PI) increases.
-      // So motion is increasing Z.
-      // To face +Z, rotation should be 0. To face -Z, rotation Math.PI.
-      // If we want to race "forward" along increasing Z?
-      return 0; // Face increasing Z.
+      return 0; // Unreachable (startRotation definido em maps.ts), mantido por segurança
     }
 
     const [x1, z1] = points[0];
@@ -291,6 +280,9 @@ export function Game() {
     if (networkManager.roomCode) {
       networkManager.cleanup();
     }
+    // [Fix 12.3] Clear interpolator buffers — singleton persists between sessions,
+    // stale snapshots from previous players/rooms would contaminate next race
+    interpolator.reset();
     gameStateRef.current = "waiting";
     setScreen("menu");
     setGameState("waiting");
@@ -452,7 +444,7 @@ export function Game() {
               fps={fps}
               frameMs={frameMs}
               ping={ping}
-              debug={true}
+              debug={process.env.NODE_ENV === "development"}
               gameState={gameState}
               countdown={countdown}
               players={players}

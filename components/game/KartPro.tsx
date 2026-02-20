@@ -13,7 +13,7 @@ import { KartDriftSmoke, getRearWheelPositions } from "./KartEffects";
 import { PlayerNameTag } from "./PlayerNameTag";
 import { COLLIDER_HALF_EXTENTS, COLLIDER_OFFSET, POSITION_UPDATE_INTERVAL, KART_MODEL_OFFSET } from '@/lib/game/engine-constants';
 import { useNetworkPrediction } from "@/hooks/useNetworkPrediction";
-import { applyBoost as coreApplyBoost, applyStarPower as coreApplyStarPower } from "@/lib/game/kart-physics-core";
+import { applyBoost as coreApplyBoost, applyStarPower as coreApplyStarPower, applyOilSlip as coreApplyOilSlip, spinOut as coreSpinOut } from "@/lib/game/kart-physics-core";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -58,9 +58,58 @@ export interface KartRef {
     applyStarPower: (duration?: number) => void;
     applyOilSlip: (duration?: number) => void;
     spinOut: () => void;
+    /** [Fix 2.8] Returns true if the kart is currently invincible (star power active) */
+    getIsInvincible?: () => boolean;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Atualiza o lapProgress de forma monotônica — nunca deixa regredir durante
+ * avanço normal. Colisões laterais com outros karts empurram o kart para a borda
+ * da pista, fazendo a projeção no spline recuar levemente (ex: 0.52 → 0.49),
+ * o que faz o jogador cair no ranking por um instante.
+ *
+ * Regras:
+ * - Se `newProgress > prev` → aceita normalmente (avanço).
+ * - Se `newProgress < prev` mas a diferença circular é > 0.3 → é cruzamento de volta
+ *   legítimo (0.99→0.01); aceita e reseta maxProgress.
+ * - Se `newProgress < prev` e diferença circular ≤ 0.3 → regressão espúria;
+ *   mantém o valor máximo visto recentemente.
+ */
+function updateMonotonicProgress(
+    newProgress: number,
+    prev: number,
+    maxRef: React.MutableRefObject<number>
+): number {
+    const fwd = newProgress - prev;
+    // Circular forward distance (handles wrap 0.99→0.01)
+    const circFwd = fwd < 0 ? fwd + 1 : fwd;
+
+    if (circFwd > 0.3) {
+        // Cruzamento legítimo de volta — reset do máximo para nova volta
+        maxRef.current = newProgress;
+        return newProgress;
+    }
+
+    if (newProgress >= prev) {
+        // Avanço normal — atualiza máximo
+        if (newProgress > maxRef.current) maxRef.current = newProgress;
+        return newProgress;
+    }
+
+    // Regressão espúria (colisão lateral ou jitter do spline):
+    // retorna o maior entre newProgress e o máximo recente,
+    // mas só se a regressão for pequena (< 0.05)
+    const regression = prev - newProgress;
+    if (regression < 0.05) {
+        return maxRef.current > newProgress ? maxRef.current : newProgress;
+    }
+
+    // Regressão grande mas não-volta: aceita (pode ser reverso intencional)
+    maxRef.current = newProgress;
+    return newProgress;
+}
 
 // ── Component ───────────────────────────────────────────────────────
 
@@ -129,6 +178,11 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
     // Track spline for lap progress (industry-standard spline projection)
     const trackSplineRef = useRef<TrackSpline | null>(null);
     const progressRef = useRef(0);
+    // Monotonic progress guard: lapProgress nunca regride durante avanço normal.
+    // Regressão legítima (fim de volta) tem circularDelta < 0.05 (ex: 0.99→0.01).
+    // Regressão espúria por colisão lateral tem circularDelta pequeno mas lapProgress recua.
+    // Guardamos o maior valor RECENTE e só aceitamos recuo se for cruzamento de volta.
+    const maxProgressRef = useRef(0);
 
     // Resolve physics preset (per-vehicle tuning)
     const preset = useMemo<KartPhysicsConfig>(() => {
@@ -186,16 +240,38 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             boostStrength.current = 1.3;
         },
         applyOilSlip: (duration = 2.5) => {
-            if (isInvincible.current) return;
-            isOilSlipping.current = true;
-            oilSlipTime.current = 0;
-            safeTimeout(() => { isOilSlipping.current = false; }, duration * 1000);
+            const coreState = network.getPhysicsState();
+            if (coreState) {
+                coreApplyOilSlip(coreState);
+                // Programa reset via timeout (core não tem timer embutido para oil)
+                safeTimeout(() => {
+                    const s = network.getPhysicsState();
+                    if (s) { s.isOilSlipping = false; s.oilSlipTime = 0; }
+                }, duration * 1000);
+            } else {
+                // Fallback para karts sem network prediction (ex: bots visualizados como remoto)
+                if (isInvincible.current) return;
+                isOilSlipping.current = true;
+                oilSlipTime.current = 0;
+                safeTimeout(() => { isOilSlipping.current = false; }, duration * 1000);
+            }
         },
         spinOut: () => {
-            if (isInvincible.current || isSpinningOut.current) return;
-            isSpinningOut.current = true;
-            spinOutTime.current = 0;
-            currentSpeed.current *= 0.1; // Kill most speed but not all (feels better than hard stop)
+            const coreState = network.getPhysicsState();
+            if (coreState) {
+                coreSpinOut(coreState);
+            } else {
+                // Fallback para karts sem network prediction
+                if (isInvincible.current || isSpinningOut.current) return;
+                isSpinningOut.current = true;
+                spinOutTime.current = 0;
+                currentSpeed.current *= 0.1;
+            }
+        },
+        // [Fix 2.8] Expose invincibility state so item system can skip broadcast when blocked
+        getIsInvincible: () => {
+            const coreState = network.getPhysicsState();
+            return coreState ? coreState.isInvincible : isInvincible.current;
         },
     }));
 
@@ -238,7 +314,8 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
             if (elapsed - lastUpdateTime.current >= POSITION_UPDATE_INTERVAL) {
                 lastUpdateTime.current = elapsed;
                 if (trackSplineRef.current) {
-                    progressRef.current = trackSplineRef.current.project(t.x, t.z, progressRef.current);
+                    const raw = trackSplineRef.current.project(t.x, t.z, progressRef.current);
+                    progressRef.current = updateMonotonicProgress(raw, progressRef.current, maxProgressRef);
                 }
                 onPositionUpdate?.(id, [t.x, t.y, t.z], currentRotation.current, 0, progressRef.current);
             }
@@ -421,7 +498,8 @@ export const KartPro = forwardRef<KartRef, KartProps>(({
         if (elapsed - lastUpdateTime.current >= POSITION_UPDATE_INTERVAL) {
             lastUpdateTime.current = elapsed;
             if (trackSplineRef.current) {
-                progressRef.current = trackSplineRef.current.project(tx, tz, progressRef.current);
+                const raw = trackSplineRef.current.project(tx, tz, progressRef.current);
+                progressRef.current = updateMonotonicProgress(raw, progressRef.current, maxProgressRef);
             }
             onPositionUpdate?.(id, [tx, ty, tz], rot, Math.abs(currentSpeed.current), progressRef.current);
         }

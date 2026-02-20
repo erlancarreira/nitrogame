@@ -29,6 +29,7 @@ function getOilShared() {
 export interface OilPoolRef {
     spawn: (position: [number, number, number], ownerId?: string) => void;
     despawn: (id: string) => void;
+    getActiveOils: () => Array<{ id: string; position: [number, number, number]; ownerId: string; spawnTime: number }>;
     getSnapshot: () => any[];
     restoreSnapshot: (items: any[]) => void;
 }
@@ -164,6 +165,12 @@ export const OilPool = forwardRef<OilPoolRef, OilPoolProps>(({ onCollide }, ref)
                 slot.active = false;
                 forceUpdate(n => n + 1);
             }
+        },
+        // Posições ativas para detecção por proximidade (ItemCollisionChecker)
+        getActiveOils: () => {
+            return poolRef.current
+                .filter(p => p.active)
+                .map(p => ({ id: p.id, position: p.position, ownerId: p.ownerId, spawnTime: p.spawnTime }));
         },
         getSnapshot: () => {
             return poolRef.current.filter(p => p.active).map(p => ({

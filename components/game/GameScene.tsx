@@ -16,8 +16,8 @@ import { FollowCamera } from "./FollowCamera";
 import { RemoteKart } from "./RemoteKart";
 import { networkManager } from "@/lib/game/networking";
 import { generateItemBoxPositions } from "@/lib/game/track-utils";
-import { BananaPool } from "./InstancedBananas";
-import { OilPool } from "./InstancedOil";
+import { BananaPool, type BananaPoolRef } from "./InstancedBananas";
+import { OilPool, type OilPoolRef } from "./InstancedOil";
 import { getModelScale, DEFAULT_CAR_MODEL } from "@/lib/game/cars";
 import { SkidMarks, getRearWheelPositions } from "./KartEffects";
 import { useItemSystem } from "@/hooks/use-item-system";
@@ -30,6 +30,83 @@ import type { RacerState } from "@/hooks/use-race-state";
 import { interpolator } from "@/lib/game/interpolator";
 
 import { netClock } from "@/lib/netcode/netclock";
+
+// ── Raios ao quadrado para detecção por proximidade (evita sqrt a cada frame) ──
+const PROX_BANANA_R2 = 1.5 * 1.5; // 1.5m de raio
+const PROX_OIL_R2 = 2.0 * 2.0;    // 2.0m de raio
+const PROX_OWNER_IMMUNITY_MS = 1500;
+
+/**
+ * ItemCollisionChecker — Detecção de colisão por proximidade para o kart local.
+ *
+ * Complementa (e corrige) a detecção por sensor Rapier, que falha quando a banana
+ * é spawnada via BANANA_SPAWN enquanto o kart já está dentro dela (sem transição
+ * de "não-sobreposto" → "sobreposto", o evento onIntersectionEnter nunca dispara).
+ *
+ * Roda todo frame via useFrame, checando distância do kart local a todos os itens ativos.
+ */
+function ItemCollisionChecker({
+  kartRef,
+  bananaPoolRef,
+  oilPoolRef,
+  humanPlayerId,
+  onBananaHit,
+  onOilHit,
+}: {
+  kartRef: React.RefObject<KartRef | null>;
+  bananaPoolRef: React.RefObject<BananaPoolRef | null>;
+  oilPoolRef: React.RefObject<OilPoolRef | null>;
+  humanPlayerId: string;
+  onBananaHit: (localId: string, kartId: string, netId: string) => void;
+  onOilHit: (oilId: string, kartId: string) => void;
+}) {
+  // Cooldown por item: { time, spawnTime } para lidar com reciclagem de slots
+  const hitCooldowns = React.useRef<Map<string, { time: number; spawnTime: number }>>(new Map());
+
+  useR3FFrame(() => {
+    const kart = kartRef.current;
+    if (!kart || !humanPlayerId) return;
+
+    const pos = kart.getPosition();
+    const now = performance.now();
+
+    // ── Bananas ──
+    const bananas = bananaPoolRef.current?.getActiveBananas() ?? [];
+    for (const banana of bananas) {
+      // Imunidade do dropper por 1.5s
+      if (banana.ownerId === humanPlayerId && now - banana.spawnTime < PROX_OWNER_IMMUNITY_MS) continue;
+
+      // Cooldown por slot (spawnTime distingue reciclagem do mesmo slot)
+      const hit = hitCooldowns.current.get(banana.id);
+      if (hit && hit.spawnTime === banana.spawnTime && now - hit.time < 500) continue;
+
+      const dx = pos[0] - banana.position[0];
+      const dz = pos[2] - banana.position[2];
+      if (dx * dx + dz * dz < PROX_BANANA_R2) {
+        hitCooldowns.current.set(banana.id, { time: now, spawnTime: banana.spawnTime });
+        onBananaHit(banana.id, humanPlayerId, banana.netId);
+      }
+    }
+
+    // ── Óleos ──
+    const oils = oilPoolRef.current?.getActiveOils() ?? [];
+    for (const oil of oils) {
+      if (oil.ownerId === humanPlayerId && now - oil.spawnTime < PROX_OWNER_IMMUNITY_MS) continue;
+
+      const hit = hitCooldowns.current.get(oil.id);
+      if (hit && hit.spawnTime === oil.spawnTime && now - hit.time < 2000) continue;
+
+      const dx = pos[0] - oil.position[0];
+      const dz = pos[2] - oil.position[2];
+      if (dx * dx + dz * dz < PROX_OIL_R2) {
+        hitCooldowns.current.set(oil.id, { time: now, spawnTime: oil.spawnTime });
+        onOilHit(oil.id, humanPlayerId);
+      }
+    }
+  });
+
+  return null;
+}
 
 export type GameSceneProps = {
   selectedMap: MapConfig;
@@ -174,6 +251,31 @@ export const GameScene = React.memo(function GameScene({
     }, 100);
   }, [onSceneReady]);
 
+  // Build adapters for remote human players so shells/items can target them.
+  // Each adapter reads position from the interpolator (no Rapier, no KartRef).
+  const remoteKartAdapters = React.useMemo(() => {
+    return remoteHumans.map((remote) => {
+      const startPos = selectedMap.startPositions[players.indexOf(remote)] || [0, 1, 0];
+      const adapter: KartRef = {
+        getPosition: () => {
+          const state = interpolator.getInterpolatedState(remote.id, performance.now() - 150);
+          return state ? state.position : startPos as [number, number, number];
+        },
+        getRotation: () => {
+          const state = interpolator.getInterpolatedState(remote.id, performance.now() - 150);
+          return state ? state.rotation : 0;
+        },
+        getLinvel: () => null,
+        getGroup: () => null,
+        applyBoost: () => {},
+        applyStarPower: () => {},
+        applyOilSlip: () => {},
+        spinOut: () => {},
+      };
+      return { id: remote.id, ref: { current: adapter } as React.RefObject<KartRef> };
+    });
+  }, [remoteHumans, players, selectedMap.startPositions]);
+
   React.useEffect(() => {
     const karts: Array<{ id: string; ref: React.RefObject<KartRef> }> = [];
     if (humanPlayer) {
@@ -182,8 +284,10 @@ export const GameScene = React.memo(function GameScene({
     botPlayersHost.forEach((b) => {
       karts.push({ id: b.id, ref: { current: botRefs.current[b.id] ?? null } as React.RefObject<KartRef> });
     });
+    // Include remote human adapters (for shell targeting + item collision)
+    karts.push(...remoteKartAdapters);
     allKartRefsCache.current = karts;
-  }, [humanPlayer, botPlayersHost]);
+  }, [humanPlayer, botPlayersHost, remoteKartAdapters]);
 
   const getAllKartRefs = useCallback(() => allKartRefsCache.current, []);
 
@@ -243,6 +347,9 @@ export const GameScene = React.memo(function GameScene({
         const vx = Math.sin(rot) * speed;
         const vz = Math.cos(rot) * speed;
 
+        const seq = localSeqRef.current++;
+        if (localSeqRef.current > 65535) localSeqRef.current = 0; // Uint16 wrap
+
         // Network broadcast (POS)
         networkManager.broadcast({
           type: "POS",
@@ -252,6 +359,7 @@ export const GameScene = React.memo(function GameScene({
           s: speed,
           l: progress,
           t: netClock.now, // Server Time
+          seq,
           vx,
           vz,
         });
@@ -532,6 +640,19 @@ export const GameScene = React.memo(function GameScene({
           <BananaPool ref={bananaPoolRef} onCollide={handleBananaCollide} />
           <OilPool ref={oilPoolRef} onCollide={handleOilCollide} />
 
+          {/* Detecção por proximidade para o kart local (corrige colisões em multiplayer
+              onde bananas chegam via rede enquanto o kart já está na posição) */}
+          {humanPlayer && (
+            <ItemCollisionChecker
+              kartRef={kartRef}
+              bananaPoolRef={bananaPoolRef}
+              oilPoolRef={oilPoolRef}
+              humanPlayerId={humanPlayer.id}
+              onBananaHit={handleBananaCollide}
+              onOilHit={handleOilCollide}
+            />
+          )}
+
           {/* Red Shells (Rockets) */}
           {redShells.map((shell) => (
             <RedShell
@@ -559,7 +680,7 @@ export const GameScene = React.memo(function GameScene({
 
         {/* Sound System */}
         <SoundEffects ref={sfxRef} />
-        <EngineSound speedRef={playerSpeedRef} maxSpeed={45} enabled={gameState === "racing" || gameState === "countdown" || gameState === "finished"} />
+        <EngineSound speedRef={playerSpeedRef} maxSpeed={40} enabled={gameState === "racing" || gameState === "countdown" || gameState === "finished"} />
         <DriftSound isDriftingRef={isDriftingRef} enabled={gameState === "racing" || gameState === "finished"} />
         <SpatialEngineSound
           playerTransformRef={playerTransformRef}

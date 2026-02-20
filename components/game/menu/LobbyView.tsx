@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { MAPS, type MapConfig } from "@/lib/game/maps";
 import { Copy, Check, MessageCircle } from "lucide-react";
 
-// All maps are now available
 const AVAILABLE_MAPS = MAPS;
 import { KART_COLORS, type Player } from "@/lib/game/types";
 import { networkManager } from "@/lib/game/networking";
@@ -34,13 +33,6 @@ interface LobbyViewProps {
 function getMapIdColor(id: string) {
   switch (id) {
     case "green-valley": return "from-green-400 to-emerald-600";
-    case "sunset-circuit": return "from-orange-400 to-red-600";
-    case "frost-peak": return "from-cyan-400 to-blue-600";
-    case "neon-nights": return "from-purple-500 to-indigo-700";
-    case "volcano-rush": return "from-red-500 to-orange-600";
-    case "crystal-caves": return "from-blue-400 to-purple-500";
-    case "cyber-loop": return "from-green-400 to-cyan-500";
-    case "cartoon-race-track-oval": return "from-green-500 to-emerald-700";
     default: return "from-slate-400 to-slate-600";
   }
 }
@@ -216,45 +208,33 @@ export function LobbyView({
                   <span className="text-orange-500">🏆</span> {t.trackSelect}
                 </h3>
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 md:gap-2.5 flex-1 overflow-y-auto pr-1 custom-scrollbar">
-                  {AVAILABLE_MAPS.map((map) => {
-                    const isAvailable = map.id === "green-valley" || map.id === "cartoon-race-track-oval" || map.id === "generated-technical"; // Only these maps are available for selection, others are locked for development
-                    return (
-                      <button
-                        key={map.id}
-                        onClick={() => isAvailable && onMapChange(map)}
-                        disabled={!isAvailable}
-                        className={`relative group rounded-lg sm:rounded-xl overflow-hidden border-2 sm:border-3 transition-all duration-200 text-left h-14 sm:h-18 md:h-24 ${!isAvailable
-                          ? "border-slate-300 opacity-40 cursor-not-allowed"
-                          : selectedMap.id === map.id
-                            ? "border-sky-500 shadow-xl scale-[1.02] ring-2 sm:ring-3 ring-sky-200 cursor-pointer"
-                            : "border-white/50 opacity-80 hover:opacity-100 hover:scale-[1.02] hover:border-white hover:shadow-lg cursor-pointer"
-                          }`}
-                      >
-                        <div className={`absolute inset-0 bg-linear-to-br ${getMapIdColor(map.id)}`}></div>
-                        <div className={`absolute inset-0 ${!isAvailable ? 'bg-black/60' : 'bg-black/10 group-hover:bg-black/5'} transition-colors`}></div>
-                        <div className="absolute inset-0 p-1.5 sm:p-2 md:p-3 flex flex-col justify-between">
-                          <div className={`self-start px-1.5 sm:px-2 py-0.5 rounded-full text-[8px] sm:text-[10px] md:text-xs text-white font-bold uppercase backdrop-blur-sm border sm:border-2 shadow-sm ${getDifficultyColor(map.difficulty)}`}>
-                            {map.difficulty}
-                          </div>
-                          <div className="font-black text-white text-[10px] sm:text-xs md:text-base italic uppercase drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] leading-tight">{map.name}</div>
+                  {AVAILABLE_MAPS.map((map) => (
+                    <button
+                      key={map.id}
+                      onClick={() => onMapChange(map)}
+                      className={`relative group rounded-lg sm:rounded-xl overflow-hidden border-2 sm:border-3 transition-all duration-200 text-left h-14 sm:h-18 md:h-24 ${
+                        selectedMap.id === map.id
+                          ? "border-sky-500 shadow-xl scale-[1.02] ring-2 sm:ring-3 ring-sky-200 cursor-pointer"
+                          : "border-white/50 opacity-80 hover:opacity-100 hover:scale-[1.02] hover:border-white hover:shadow-lg cursor-pointer"
+                      }`}
+                    >
+                      <div className={`absolute inset-0 bg-linear-to-br ${getMapIdColor(map.id)}`}></div>
+                      <div className="absolute inset-0 bg-black/10 group-hover:bg-black/5 transition-colors"></div>
+                      <div className="absolute inset-0 p-1.5 sm:p-2 md:p-3 flex flex-col justify-between">
+                        <div className={`self-start px-1.5 sm:px-2 py-0.5 rounded-full text-[8px] sm:text-[10px] md:text-xs text-white font-bold uppercase backdrop-blur-sm border sm:border-2 shadow-sm ${getDifficultyColor(map.difficulty)}`}>
+                          {map.difficulty}
                         </div>
-                        {!isAvailable && (
-                          <div className="absolute top-2 right-1 flex items-center justify-center">
-                            <div className="bg-yellow-500/90 text-slate-900 px-1 py-0.5 sm:py-1 rounded-full text-[4px] sm:text-[1px] md:text-xs font-black uppercase border sm:border-2 border-yellow-300 shadow-lg">
-                              🚧 Em Desenvolvimento
-                            </div>
-                          </div>
-                        )}
-                        {selectedMap.id === map.id && isAvailable && (
-                          <div className="absolute top-1 right-1 sm:top-2 sm:right-2 bg-sky-500 text-white rounded-full p-0.5 sm:p-1 shadow-sm">
-                            <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
-                            </svg>
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
+                        <div className="font-black text-white text-[10px] sm:text-xs md:text-base italic uppercase drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] leading-tight">{map.name}</div>
+                      </div>
+                      {selectedMap.id === map.id && (
+                        <div className="absolute top-1 right-1 sm:top-2 sm:right-2 bg-sky-500 text-white rounded-full p-0.5 sm:p-1 shadow-sm">
+                          <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  ))}
                 </div>
               </div>
 

@@ -21,6 +21,9 @@ export type NetworkMessage =
     | { type: "SHELL_SPAWN"; shell: { id: string; ownerId: string; targetId: string | null; startPosition: [number, number, number]; startRotation: number } }
     | { type: "SHELL_DESPAWN"; shellId: string }
     | { type: "GAME_SNAPSHOT"; snapshot: GameSnapshot; lastProcessedFrame: number }
+    // Item spawn sync (online multiplayer)
+    | { type: "BANANA_SPAWN"; bananaNetId?: string; position: [number, number, number]; rotationY: number; ownerId: string }
+    | { type: "OIL_SPAWN"; position: [number, number, number]; ownerId: string }
     // Entity Replication
     | { type: "REQUEST_WORLD_STATE" }
     | { type: "WORLD_STATE_SYNC"; shells: any[]; bananas: any[]; oils: any[] };
@@ -35,25 +38,14 @@ export interface LobbyState {
     settings: LobbySettings;
 }
 
-// ICE servers for WebRTC NAT traversal
-const ICE_SERVERS: RTCIceServer[] = [
+// Fallback ICE servers used when the game server is unreachable or returns nothing.
+// Includes public openrelay.metered.ca as last-resort TURN (no account needed).
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-    },
-    {
-        urls: "turn:openrelay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-    },
-    {
-        urls: "turn:openrelay.metered.ca:443?transport=tcp",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-    },
+    { urls: "turn:openrelay.metered.ca:80",  username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
 ];
 
 const envServer = process.env.NEXT_PUBLIC_GAME_SERVER;
@@ -200,6 +192,11 @@ export class NetworkManager {
     private peerConnections = new Map<string, RTCPeerConnection>();
     private dataChannels = new Map<string, RTCDataChannel>();
     private webrtcReady = new Set<string>();
+    private webrtcRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private webrtcRetryCount = new Map<string, number>();
+    private static MAX_WEBRTC_RETRIES = 3;
+    private static WEBRTC_RETRY_DELAY_MS = 3000;
+    private iceServers: RTCIceServer[] = FALLBACK_ICE_SERVERS;
 
     // Clock synchronization (NTP-style)
     // removed local clockOffset/clockSynced, delegating to netClock
@@ -443,6 +440,12 @@ export class NetworkManager {
         this.peerConnections.clear();
         this.dataChannels.clear();
         this.webrtcReady.clear();
+        for (const [, timer] of this.webrtcRetryTimers) {
+            clearTimeout(timer);
+        }
+        this.webrtcRetryTimers.clear();
+        this.webrtcRetryCount.clear();
+        this.iceServers = FALLBACK_ICE_SERVERS;
         // Clear all listeners to prevent stale references
         this._messageListeners = [];
         this._disconnectListeners = [];
@@ -459,23 +462,38 @@ export class NetworkManager {
 
     // ---- Private: Send POS via WebRTC mesh (fallback Socket.IO relay) ----
 
+    // When relay is the sole transport, send one reliable packet after reconnect
+    // so the remote side gets an immediate position update, then resume volatile.
+    private _needsReliableRelayOnce = false;
+
     private sendPosToAll(msg: NetworkMessage): void {
         if (msg.type !== "POS") return;
 
         // Try binary via WebRTC first (lower latency + smaller packets)
         const binary = encodePosMessage({ ...msg, seq: msg.seq || 0 });
 
+        let sentViaWebRTC = false;
         for (const [, dc] of this.dataChannels) {
             if (dc.readyState === "open") {
                 try {
                     dc.send(binary);
+                    sentViaWebRTC = true;
                 } catch { /* fall through to relay */ }
             }
         }
 
-        // Always relay via server so peers without RTC still receive updates.
-        // Remote clients dedupe by timestamp per id.
-        this.socket?.volatile.emit("pos-relay", binary);
+        // Always use volatile for relay (POS data is ephemeral — old positions are useless).
+        // After a Socket.IO reconnect, send ONE reliable packet so the remote side
+        // gets an immediate position update instead of waiting for the next volatile
+        // to succeed.
+        if (this.socket?.connected) {
+            if (this._needsReliableRelayOnce && !sentViaWebRTC) {
+                this._needsReliableRelayOnce = false;
+                this.socket.emit("pos-relay", binary);
+            } else {
+                this.socket.volatile.emit("pos-relay", binary);
+            }
+        }
     }
 
     // ---- Private: Socket.IO Event Listeners ----
@@ -522,15 +540,30 @@ export class NetworkManager {
         });
 
         // POS relay fallback
-        this.socket.on("pos-relay", (msg: NetworkMessage | ArrayBuffer) => {
-            if (msg instanceof ArrayBuffer) {
-                const decoded = decodePosMessage(msg);
+        // Socket.IO may deliver binary as ArrayBuffer, Uint8Array, or Buffer depending on transport.
+        // Using duck-type check (byteLength) instead of instanceof to avoid cross-realm failures.
+        this.socket.on("pos-relay", (msg: NetworkMessage | ArrayBuffer | Uint8Array) => {
+            const raw = msg as any;
+            if (raw && typeof raw.byteLength === "number") {
+                // Binary data — ensure we have a clean ArrayBuffer for DataView.
+                // Uint8Array.buffer may return the ENTIRE underlying buffer (not the slice),
+                // so we must use byteOffset+byteLength to extract the correct range.
+                let ab: ArrayBuffer;
+                if (raw.buffer instanceof ArrayBuffer && raw.byteOffset !== undefined) {
+                    ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+                } else {
+                    ab = raw as ArrayBuffer;
+                }
+                const decoded = decodePosMessage(ab);
                 if (decoded) {
                     this.emit("message", decoded);
                     return;
                 }
             }
-            this.emit("message", msg as NetworkMessage);
+            // JSON fallback (legacy or non-POS)
+            if (typeof raw === "object" && raw.type) {
+                this.emit("message", raw as NetworkMessage);
+            }
         });
 
         // Player disconnected
@@ -569,6 +602,8 @@ export class NetworkManager {
                         // Socket.IO assigns new ID on reconnect
                         const oldId = this.myId;
                         this.myId = res.playerId || this.socket!.id!;
+                        // Send one reliable POS after reconnect so remote gets immediate update
+                        this._needsReliableRelayOnce = true;
                         devLog("[net] Rejoined room successfully, new id:", this.myId, "(was", oldId, ")");
                         this.emit("reconnected");
                     } else {
@@ -612,7 +647,34 @@ export class NetworkManager {
 
     // ---- Private: WebRTC Mesh ----
 
+    /** Fetch ICE servers (Cloudflare TURN credentials) from game server. */
+    private async fetchIceServers(): Promise<void> {
+        if (!this.socket) return;
+        try {
+            const servers = await new Promise<RTCIceServer[]>((resolve) => {
+                const timeout = setTimeout(() => resolve([]), 3000);
+                this.socket!.emit("get-ice-servers", (res: RTCIceServer[]) => {
+                    clearTimeout(timeout);
+                    resolve(Array.isArray(res) ? res : []);
+                });
+            });
+            if (servers.length > 0) {
+                this.iceServers = servers; // Server already merges all configured providers
+                devLog("[ice] Got", servers.length, "ICE servers from game server");
+            } else {
+                devWarn("[ice] Server returned empty, using local fallback (openrelay.metered.ca)");
+                this.iceServers = FALLBACK_ICE_SERVERS;
+            }
+        } catch {
+            devWarn("[ice] Failed to fetch ICE servers, using fallback STUN");
+            this.iceServers = FALLBACK_ICE_SERVERS;
+        }
+    }
+
     private async initiateWebRTCMesh(remotePlayers: Player[]): Promise<void> {
+        // Fetch Cloudflare TURN credentials before creating any PeerConnection
+        await this.fetchIceServers();
+
         for (const remote of remotePlayers) {
             const remoteId = remote.id;
             // Deterministic: lower socket.id sends the offer (avoids duplicate offers)
@@ -646,7 +708,7 @@ export class NetworkManager {
             return this.peerConnections.get(remoteId)!;
         }
 
-        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        const pc = new RTCPeerConnection({ iceServers: this.iceServers });
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
@@ -667,6 +729,13 @@ export class NetworkManager {
                 devWarn(`[webrtc] Connection to ${remoteId}: ${state}. Using Socket.IO relay.`);
                 this.webrtcReady.delete(remoteId);
                 this.dataChannels.delete(remoteId);
+                // Clean up the dead PeerConnection (Bug 6 fix)
+                pc.close();
+                this.peerConnections.delete(remoteId);
+                // Attempt WebRTC reconnection (Bug 2 fix)
+                if (state !== "closed") {
+                    this.scheduleWebRTCRetry(remoteId);
+                }
             }
         };
 
@@ -711,12 +780,53 @@ export class NetworkManager {
         };
     }
 
+    private scheduleWebRTCRetry(remoteId: string): void {
+        // Don't retry if already scheduled or max retries reached
+        if (this.webrtcRetryTimers.has(remoteId)) return;
+        const retries = this.webrtcRetryCount.get(remoteId) || 0;
+        if (retries >= NetworkManager.MAX_WEBRTC_RETRIES) {
+            devWarn(`[webrtc] Max retries (${NetworkManager.MAX_WEBRTC_RETRIES}) reached for ${remoteId}. Staying on relay.`);
+            return;
+        }
+
+        devLog(`[webrtc] Scheduling retry ${retries + 1}/${NetworkManager.MAX_WEBRTC_RETRIES} for ${remoteId} in ${NetworkManager.WEBRTC_RETRY_DELAY_MS}ms`);
+        const timer = setTimeout(async () => {
+            this.webrtcRetryTimers.delete(remoteId);
+            this.webrtcRetryCount.set(remoteId, retries + 1);
+
+            // Only retry if still connected via Socket.IO and not already reconnected
+            if (!this.socket?.connected) return;
+            if (this.webrtcReady.has(remoteId)) return;
+
+            // Both sides attempt: the lower ID sends offer (deterministic offerer).
+            // The higher ID also schedules, so if the lower-ID side's retry
+            // was the one that failed, the higher-ID side will try as offerer
+            // on subsequent retries (role swap after first failed attempt).
+            const shouldOffer = (retries === 0)
+                ? this.myId < remoteId   // First retry: normal deterministic rule
+                : this.myId > remoteId;  // Subsequent retries: swap roles
+            if (shouldOffer) {
+                devLog(`[webrtc] Retrying offer to ${remoteId} (attempt ${retries + 1})...`);
+                await this.createOffer(remoteId);
+            }
+        }, NetworkManager.WEBRTC_RETRY_DELAY_MS);
+
+        this.webrtcRetryTimers.set(remoteId, timer);
+    }
+
     private closePeerConnection(remoteId: string): void {
         const pc = this.peerConnections.get(remoteId);
         if (pc) pc.close();
         this.peerConnections.delete(remoteId);
         this.dataChannels.delete(remoteId);
         this.webrtcReady.delete(remoteId);
+        // Cancel any pending retry for this peer
+        const timer = this.webrtcRetryTimers.get(remoteId);
+        if (timer) {
+            clearTimeout(timer);
+            this.webrtcRetryTimers.delete(remoteId);
+        }
+        this.webrtcRetryCount.delete(remoteId);
     }
 }
 

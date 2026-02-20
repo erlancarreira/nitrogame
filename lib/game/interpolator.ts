@@ -17,6 +17,8 @@ export type Snapshot = {
 class SnapshotBuffer {
     private snapshots: Snapshot[] = [];
     private static MAX_EXTRAPOLATION_MS = 300;
+    /** After this many ms without packets, consider the remote player disconnected */
+    private static DISCONNECT_TIMEOUT_MS = 3000;
 
     // Visual smoothing state — prevents snapping when new packets arrive
     private smoothPos: [number, number, number] | null = null;
@@ -85,6 +87,20 @@ class SnapshotBuffer {
         // 1. Extrapolation (renderTime is ahead of newest)
         if (renderTime >= newest.lt) {
             const timeDiff = renderTime - newest.lt;
+
+            // If no packets for too long, consider remote player disconnected
+            if (timeDiff > SnapshotBuffer.DISCONNECT_TIMEOUT_MS) {
+                if (IS_DEV) {
+                    const now = performance.now();
+                    if (now - this._lastDebugLog > 5000) {
+                        this._lastDebugLog = now;
+                        console.warn(
+                            `[interp] Remote player timed out (${(timeDiff / 1000).toFixed(1)}s without packets)`
+                        );
+                    }
+                }
+                return null;
+            }
 
             // Debug: log when we're stuck extrapolating
             if (IS_DEV && timeDiff > 100) {
@@ -254,6 +270,16 @@ export class SnapshotInterpolator {
         }
 
         return result;
+    }
+
+    /**
+     * [Fix 12.3] Reset all buffers between sessions.
+     * Call this when returning to the main menu so stale snapshots
+     * from previous players/rooms don't contaminate the next race.
+     */
+    reset() {
+        this.buffers.clear();
+        this.lastPacketTimes.clear();
     }
 }
 

@@ -12,14 +12,16 @@ const BANANA_MODEL_URL = "/assets/items/banana_peel_mario_kart.glb";
 const BANANA_SCALE = 0.002; // Model is ~500 units tall (cm scale), 0.003 → ~1.5m in-game
 
 export interface BananaPoolRef {
-    spawn: (position: [number, number, number], rotation: number, ownerId?: string) => void;
+    spawn: (position: [number, number, number], rotation: number, ownerId?: string, netId?: string) => string;
     despawn: (id: string) => void;
+    despawnByNetId: (netId: string) => void;
+    getActiveBananas: () => Array<{ id: string; netId: string; position: [number, number, number]; ownerId: string; spawnTime: number }>;
     getSnapshot: () => any[];
     restoreSnapshot: (items: any[]) => void;
 }
 
 interface BananaPoolProps {
-    onCollide: (bananaId: string, kartId: string) => void;
+    onCollide: (bananaId: string, kartId: string, netId: string) => void;
 }
 
 // ── Individual Banana (physics body + sensor) ────────────────────────
@@ -103,6 +105,7 @@ BananaItem.displayName = "BananaItem";
 // ── Pool State ───────────────────────────────────────────────────────
 interface BananaSlot {
     id: string;
+    netId: string;   // Cross-client stable ID (gerado pelo dropper, synced via BANANA_SPAWN)
     active: boolean;
     position: [number, number, number];
     rotation: [number, number, number];
@@ -117,6 +120,7 @@ export const BananaPool = forwardRef<BananaPoolRef, BananaPoolProps>(({ onCollid
     const poolRef = useRef<BananaSlot[]>(
         Array.from({ length: MAX_BANANAS }, (_, i) => ({
             id: `banana_pool_${i}`,
+            netId: `banana_pool_${i}`,
             active: false,
             position: [0, 0, 0] as [number, number, number],
             rotation: [0, 0, 0] as [number, number, number],
@@ -127,7 +131,7 @@ export const BananaPool = forwardRef<BananaPoolRef, BananaPoolProps>(({ onCollid
     const [, forceUpdate] = React.useState(0);
 
     useImperativeHandle(ref, () => ({
-        spawn: (position, rotationY, ownerId = "") => {
+        spawn: (position, rotationY, ownerId = "", netId) => {
             const pool = poolRef.current;
             let index = pool.findIndex(p => !p.active);
 
@@ -147,18 +151,34 @@ export const BananaPool = forwardRef<BananaPoolRef, BananaPoolProps>(({ onCollid
             // Create NEW arrays to trigger useEffect dependency change
             const slot = pool[index];
             slot.active = true;
+            slot.netId = netId || slot.id; // Cross-client ID ou fallback para ID local
             slot.position = [position[0], position[1], position[2]]; // NEW array, not mutation
             slot.rotation = [0, rotationY, 0]; // NEW array, not mutation
             slot.ownerId = ownerId;
             slot.spawnTime = performance.now();
             forceUpdate(n => n + 1);
+            return slot.id;
         },
         despawn: (id) => {
             const slot = poolRef.current.find(p => p.id === id);
+            if (slot && slot.active) {
+                slot.active = false;
+                forceUpdate(n => n + 1);
+            }
+        },
+        // Despawn por netId (cross-client) — usado ao receber ITEM_HIT de outro jogador
+        despawnByNetId: (netId) => {
+            const slot = poolRef.current.find(p => p.netId === netId && p.active);
             if (slot) {
                 slot.active = false;
                 forceUpdate(n => n + 1);
             }
+        },
+        // Posições ativas para detecção por proximidade (ItemCollisionChecker)
+        getActiveBananas: () => {
+            return poolRef.current
+                .filter(p => p.active)
+                .map(p => ({ id: p.id, netId: p.netId, position: p.position, ownerId: p.ownerId, spawnTime: p.spawnTime }));
         },
         // State Replication
         getSnapshot: () => {
@@ -179,6 +199,7 @@ export const BananaPool = forwardRef<BananaPoolRef, BananaPoolProps>(({ onCollid
                 if (index === -1) return;
                 const slot = pool[index];
                 slot.active = true;
+                slot.netId = slot.id;
                 slot.position = item.position;
                 slot.rotation = [0, item.rotationY, 0];
                 slot.ownerId = item.ownerId;
@@ -189,8 +210,8 @@ export const BananaPool = forwardRef<BananaPoolRef, BananaPoolProps>(({ onCollid
     }));
 
     // Stable callback refs per slot (avoid creating new functions each render)
-    const handleCollide = useCallback((bananaId: string, kartId: string) => {
-        onCollide(bananaId, kartId);
+    const handleCollide = useCallback((bananaId: string, kartId: string, netId: string) => {
+        onCollide(bananaId, kartId, netId);
     }, [onCollide]);
 
     return (
@@ -204,7 +225,7 @@ export const BananaPool = forwardRef<BananaPoolRef, BananaPoolProps>(({ onCollid
                     rotation={item.rotation}
                     ownerId={item.ownerId}
                     spawnTime={item.spawnTime}
-                    onCollide={(kartId) => handleCollide(item.id, kartId)}
+                    onCollide={(kartId) => handleCollide(item.id, kartId, item.netId)}
                 />
             ))}
         </>

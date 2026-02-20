@@ -35,6 +35,7 @@ const DROP_BACK_DIST = 4;      // tenta 4 ou 5
 const DROP_OIL_DIST = 4;
 const DROP_HEIGHT = 0.4;
 const OIL_HEIGHT = 0.05;
+const ITEM_HIT_DEDUP_MS = 600; // janela para deduplicar hits do sensor Rapier + proximidade
 let _shellIdCounter = 0;
 
 // ── Hook ────────────────────────────────────────────────────────────
@@ -57,6 +58,11 @@ export function useItemSystem({
   onItemChange,
   getAllKartRefs,
 }: UseItemSystemOptions) {
+  // Helper: check if an entity is locally owned (human player or host's bot)
+  const isLocalEntity = useCallback((id: string) => {
+    if (id === humanPlayerId) return true;
+    return !!botRefs.current[id];
+  }, [humanPlayerId, botRefs]);
   const [currentItem, setCurrentItem] = useState<ItemType>("none");
   const [redShells, setRedShells] = useState<RedShell[]>([]);
 
@@ -65,6 +71,8 @@ export function useItemSystem({
   const oilPoolRef = useRef<OilPoolRef>(null);
   const sfxRef = useRef<SoundEffectsRef>(null);
   const botTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Deduplicação: evita duplo spinOut quando sensor Rapier E proximidade disparam juntos
+  const recentItemHitsRef = useRef<Map<string, number>>(new Map());
 
   // Stable refs for useCallback closures
   const humanPlayerIdRef = useRef(humanPlayerId);
@@ -128,19 +136,20 @@ export function useItemSystem({
       } else if (item === "banana") {
         const pos = bot.getPosition();
         const rot = bot.getRotation();
-        bananaPoolRef.current?.spawn(
-          [pos[0] - Math.sin(rot) * DROP_BACK_DIST, DROP_HEIGHT, pos[2] - Math.cos(rot) * DROP_BACK_DIST],
-          0,
-          botId
-        );
+        const spawnPos: [number, number, number] = [pos[0] - Math.sin(rot) * DROP_BACK_DIST, DROP_HEIGHT, pos[2] - Math.cos(rot) * DROP_BACK_DIST];
+        const bananaNetId = `bn_${botId}_${Date.now()}`;
+        bananaPoolRef.current?.spawn(spawnPos, 0, botId, bananaNetId);
+        if (networkManager.roomCode) {
+          networkManager.broadcast({ type: "BANANA_SPAWN", bananaNetId, position: spawnPos, rotationY: 0, ownerId: botId });
+        }
       } else if (item === "oil") {
         const pos = bot.getPosition();
         const rot = bot.getRotation();
-        oilPoolRef.current?.spawn([
-          pos[0] - Math.sin(rot) * DROP_OIL_DIST,
-          OIL_HEIGHT,
-          pos[2] - Math.cos(rot) * DROP_OIL_DIST,
-        ], botId);
+        const spawnPos: [number, number, number] = [pos[0] - Math.sin(rot) * DROP_OIL_DIST, OIL_HEIGHT, pos[2] - Math.cos(rot) * DROP_OIL_DIST];
+        oilPoolRef.current?.spawn(spawnPos, botId);
+        if (networkManager.roomCode) {
+          networkManager.broadcast({ type: "OIL_SPAWN", position: spawnPos, ownerId: botId });
+        }
       } else if (item === "red_shell") {
         const pos = bot.getPosition();
         const rot = bot.getRotation();
@@ -199,7 +208,9 @@ export function useItemSystem({
           sfxRef.current?.play("item_collect");
         }
       } else {
-        const delay = 500 + Math.random() * 2500;
+        // [Fix 2.7] Reduced delay from 500+2500ms to 300+700ms — bots now use items faster
+        // Previous: up to 3s delay, bot could change waypoints twice before using item
+        const delay = 300 + Math.random() * 700;
         const timer = setTimeout(() => useBotItem(collectorId, newItem), delay);
         botTimers.current.push(timer);
       }
@@ -210,44 +221,54 @@ export function useItemSystem({
 
   // ── Collision Handlers (Authority: VICTIM reports hit) ──
 
-  const handleBananaCollide = useCallback((bananaId: string, kartId: string) => {
-    // 1. Always despawn visually locally immediately (prediction)
+  // netId: ID cross-cliente estável (gerado pelo dropper) — usado para despawn correto no lado remoto
+  const handleBananaCollide = useCallback((bananaId: string, kartId: string, netId: string = bananaId) => {
+    // Deduplicação: evita duplo spinOut quando sensor Rapier E ItemCollisionChecker disparam juntos
+    const dedupKey = `${netId}_${kartId}`;
+    const now = performance.now();
+    const lastHit = recentItemHitsRef.current.get(dedupKey);
+    if (lastHit && now - lastHit < ITEM_HIT_DEDUP_MS) return;
+    recentItemHitsRef.current.set(dedupKey, now);
+
+    // 1. Despawn visual local imediato (predição)
     bananaPoolRef.current?.despawn(bananaId);
 
-    // 2. Authority Check: Only the VICTIM broadcasts the hit.
-    // If I hit it, I tell the world.
+    // 2. Authority Check: só a VÍTIMA transmite o hit
     if (kartId === humanPlayerIdRef.current) {
       kartRef.current?.spinOut();
       sfxRef.current?.play("banana_hit");
       sfxRef.current?.play("spin_out");
 
-      // Broadcast Hit + Despawn Command
+      // itemId = netId para que o dropper possa despawnar corretamente pelo netId
       networkManager.broadcast({
         type: "ITEM_HIT",
         targetId: kartId,
         effect: "spinOut",
-        itemId: bananaId,
+        itemId: netId,
         itemType: "banana"
       });
     }
-    // If Bot hit + I am Host -> I am Authority for Bot
+    // Se Bot acertou + Sou Host -> Autoridade do Bot
     else if (networkManager.isHost && botRefs.current[kartId]) {
       botRefs.current[kartId].spinOut();
       networkManager.broadcast({
         type: "ITEM_HIT",
         targetId: kartId,
         effect: "spinOut",
-        itemId: bananaId,
+        itemId: netId,
         itemType: "banana"
       });
     }
-    // Else: Remote player hit it. I see it, but I stay silent. 
-    // I wait for their "ITEM_HIT" message to confirm and despawn it remotely.
+    // Else: jogador remoto acertou — aguarda ITEM_HIT dele para confirmar
   }, [kartRef, botRefs]);
 
   const handleOilCollide = useCallback((oilId: string, kartId: string) => {
-    // Oils don't always despawn (cooldown), but let's assume persistent for now (no despawn call here usually)
-    // If we want to despawn, add it. Logic below assumes persistent oil.
+    // Deduplicação para óleo (cooldown 2s)
+    const dedupKey = `oil_${oilId}_${kartId}`;
+    const now = performance.now();
+    const lastHit = recentItemHitsRef.current.get(dedupKey);
+    if (lastHit && now - lastHit < 2100) return;
+    recentItemHitsRef.current.set(dedupKey, now);
 
     if (kartId === humanPlayerIdRef.current) {
       kartRef.current?.applyOilSlip?.(2.5);
@@ -259,9 +280,19 @@ export function useItemSystem({
   }, [kartRef, botRefs]);
 
   const handleShellCollide = useCallback((targetId: string, shellId: string) => {
+    // [Fix 2.8] Deduplication: prevent double-hit from sensor + proximity checker
+    const dedupKey = `shell_${shellId}_${targetId}`;
+    const now = performance.now();
+    const lastHit = recentItemHitsRef.current.get(dedupKey);
+    if (lastHit && now - lastHit < ITEM_HIT_DEDUP_MS) return;
+    recentItemHitsRef.current.set(dedupKey, now);
+
     despawnShell(shellId);
 
     if (targetId === humanPlayerIdRef.current) {
+      // [Fix 2.8] Check invincibility before applying effect and broadcasting
+      const isInvincible = kartRef.current?.getIsInvincible?.() ?? false;
+      if (isInvincible) return; // Star power blocks shell
       kartRef.current?.spinOut();
       sfxRef.current?.play("spin_out");
       networkManager.broadcast({
@@ -272,6 +303,9 @@ export function useItemSystem({
         itemType: "shell"
       });
     } else if (networkManager.isHost && botRefs.current[targetId]) {
+      // [Fix 2.8] Check bot invincibility (star power timer)
+      const isInvincible = botRefs.current[targetId].getIsInvincible?.() ?? false;
+      if (isInvincible) return;
       botRefs.current[targetId].spinOut();
       networkManager.broadcast({
         type: "ITEM_HIT",
@@ -301,11 +335,24 @@ export function useItemSystem({
           }
         }
 
-        // 2. Process Item Despawn (Synced via ID)
+        // 2. Process Item Despawn — usa despawnByNetId para garantir despawn correto
+        // independente de qual slot o cliente local usou para a banana
         if (msg.itemId && msg.itemType === "banana") {
-          bananaPoolRef.current?.despawn(msg.itemId);
+          bananaPoolRef.current?.despawnByNetId(msg.itemId);
         } else if (msg.itemId && msg.itemType === "shell") {
           despawnShell(msg.itemId);
+        }
+      }
+      // ── Item spawn sync (remote banana/oil appear on our client) ──
+      else if (msg.type === "BANANA_SPAWN") {
+        // Skip if locally owned (human or host's bot — already spawned)
+        if (!isLocalEntity(msg.ownerId)) {
+          // Passa bananaNetId para que este cliente possa despawnar pelo mesmo ID cross-cliente
+          bananaPoolRef.current?.spawn(msg.position, msg.rotationY, msg.ownerId, msg.bananaNetId);
+        }
+      } else if (msg.type === "OIL_SPAWN") {
+        if (!isLocalEntity(msg.ownerId)) {
+          oilPoolRef.current?.spawn(msg.position, msg.ownerId);
         }
       }
       else if (msg.type === "SHELL_SPAWN") {
@@ -317,7 +364,7 @@ export function useItemSystem({
         setRedShells((prev) => prev.filter((s) => s.id !== msg.shellId));
       }
     },
-    [kartRef, despawnShell]
+    [kartRef, despawnShell, isLocalEntity]
   );
 
   // ── State Replication (Sync) ──
@@ -353,11 +400,12 @@ export function useItemSystem({
           if (kartRef.current) {
             const pos = kartRef.current.getPosition();
             const rot = kartRef.current.getRotation();
-            bananaPoolRef.current?.spawn(
-              [pos[0] - Math.sin(rot) * 2, 0.5, pos[2] - Math.cos(rot) * 2],
-              0,
-              humanPlayerIdRef.current || "p1"
-            );
+            const spawnPos: [number, number, number] = [pos[0] - Math.sin(rot) * 2, 0.5, pos[2] - Math.cos(rot) * 2];
+            const bananaNetId = `bn_${humanPlayerIdRef.current}_${Date.now()}`;
+            bananaPoolRef.current?.spawn(spawnPos, 0, humanPlayerIdRef.current || "p1", bananaNetId);
+            if (networkManager.roomCode) {
+              networkManager.broadcast({ type: "BANANA_SPAWN", bananaNetId, position: spawnPos, rotationY: 0, ownerId: humanPlayerIdRef.current || "p1" });
+            }
           }
         } else if (item === "red_shell") {
           if (kartRef.current) {
@@ -369,7 +417,7 @@ export function useItemSystem({
               ownerId: humanPlayerIdRef.current || "p1",
               targetId: target,
               startPosition: [pos[0] + Math.sin(rot) * 2, 0.5, pos[2] + Math.cos(rot) * 2],
-              startRotation: Math.PI / 2,
+              startRotation: rot,
             });
           }
         } else if (item === "star") {
@@ -379,11 +427,11 @@ export function useItemSystem({
           if (kartRef.current) {
             const pos = kartRef.current.getPosition();
             const rot = kartRef.current.getRotation();
-            oilPoolRef.current?.spawn([
-              pos[0] - Math.sin(rot) * 3,
-              0.05,
-              pos[2] - Math.cos(rot) * 3,
-            ], humanPlayerIdRef.current || "p1");
+            const spawnPos: [number, number, number] = [pos[0] - Math.sin(rot) * 3, 0.05, pos[2] - Math.cos(rot) * 3];
+            oilPoolRef.current?.spawn(spawnPos, humanPlayerIdRef.current || "p1");
+            if (networkManager.roomCode) {
+              networkManager.broadcast({ type: "OIL_SPAWN", position: spawnPos, ownerId: humanPlayerIdRef.current || "p1" });
+            }
           }
         }
 

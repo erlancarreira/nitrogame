@@ -64,6 +64,8 @@ export function useCountdown({
           `[countdown] Server-synced. raceStartTime=${serverRaceStartTime}`
         );
 
+        let goShownAt: number | null = null;
+
         const tick = () => {
           const serverNow = netClock.now;
           const msUntilStart = serverRaceStartTime - serverNow;
@@ -76,12 +78,16 @@ export function useCountdown({
             setCountdown(1);
           } else {
             // === GO! ===
-            setCountdown(0);
-            cleanup();
-            timeoutRef.current = setTimeout(() => {
+            if (goShownAt === null) {
+              setCountdown(0);
+              goShownAt = serverNow;
+            }
+            // Wait 400ms in SERVER time (not local setTimeout) so both clients
+            // transition to "racing" at the same server-time instant.
+            if (serverNow - goShownAt >= 400) {
+              cleanup();
               startRacing();
-              timeoutRef.current = null;
-            }, 400);
+            }
           }
         };
 
